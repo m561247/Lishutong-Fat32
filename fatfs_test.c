@@ -57,6 +57,14 @@ int disk_io_test (void) {
     return 0;
 }
 
+#pragma pack(1)
+typedef struct _mbr_t {
+    u32_t a;
+    u16_t b;
+    u32_t c;
+}mbr_t;
+#pragma pack()
+
 int main (void) {
     xfat_err_t err;
     int i;
@@ -65,8 +73,11 @@ int main (void) {
         write_buffer[i] = i;
     }
 
-    err = disk_io_test();
-    if (err) return err;
+    //err = disk_io_test();
+    //if (err) return err;
+
+    mbr_t * mbr = (mbr_t *)0x100;
+    printf("%p\n", &(mbr->c));
 
     printf("Test End!\n");
     return 0;
