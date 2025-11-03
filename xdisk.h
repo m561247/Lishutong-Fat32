@@ -1,4 +1,4 @@
- /**
+/**
  * 本源码配套的课程为 - 从0到1动手写FAT32文件系统。每个例程对应一个课时，尽可能注释。
  * 作者：李述铜
  * 课程网址：http://01ketang.cc
@@ -26,9 +26,10 @@ typedef struct _xdisk_driver_t {
  * 存储设备类型
  */
 typedef struct _xdisk_t {
-	u32_t sector_size;              // 块大小
+    u32_t sector_size;              // 块大小
 	u32_t total_sector;             // 总的块数量
     xdisk_driver_t * driver;        // 驱动接口
+    void * data;                    // 设备自定义参数
 }xdisk_t;
 
 #endif

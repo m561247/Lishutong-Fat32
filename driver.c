@@ -4,6 +4,7 @@
  * 课程网址：http://01ketang.cc
  * 版权声明：本源码非开源，二次开发，或其它商用前请联系作者。
  */
+#include <stdio.h>
 #include "xdisk.h"
 #include "xfat.h"
 
@@ -14,6 +15,20 @@
  * @return
  */
 static xfat_err_t xdisk_hw_open(xdisk_t *disk, void * init_data) {
+    const char * path = (const char *)init_data;
+
+    FILE * file = fopen(path, "rb+");
+    if (file == NULL) {
+        printf("open disk failed:%s\n", path);
+        return FS_ERR_IO;
+    }
+
+    disk->data = file;
+    disk->sector_size = 512;
+
+    fseek(file, 0, SEEK_END);
+    disk->total_sector = ftell(file) / disk->sector_size;
+    return FS_ERR_OK;
 }
 
 /**
@@ -22,6 +37,10 @@ static xfat_err_t xdisk_hw_open(xdisk_t *disk, void * init_data) {
  * @return
  */
 static xfat_err_t xdisk_hw_close(xdisk_t * disk) {
+    FILE * file = (FILE *)disk->data;
+    fclose(file);
+
+    return FS_ERR_OK;
 }
 
 /**
@@ -33,6 +52,21 @@ static xfat_err_t xdisk_hw_close(xdisk_t * disk) {
  * @return
  */
 static xfat_err_t xdisk_hw_read_sector(xdisk_t *disk, u8_t *buffer, u32_t start_sector, u32_t count) {
+    u32_t offset = start_sector * disk->sector_size;
+    FILE * file = (FILE *)disk->data;
+
+    int err = fseek(file, offset, SEEK_SET);
+    if (err == -1) {
+        printf("seek disk failed:0x%x\n", (int)offset);
+        return FS_ERR_IO;
+    }
+
+    err = (int)fread(buffer, disk->sector_size, count, file);
+    if (err == -1) {
+        printf("read disk failed:sector:%d, count:%d\n",(int)start_sector, (int)count);
+        return FS_ERR_IO;
+    }
+    return FS_ERR_OK;
 }
 
 /**
@@ -44,6 +78,24 @@ static xfat_err_t xdisk_hw_read_sector(xdisk_t *disk, u8_t *buffer, u32_t start_
  * @return
  */
 static xfat_err_t xdisk_hw_write_sector(xdisk_t *disk, u8_t *buffer, u32_t start_sector, u32_t count) {
+    u32_t offset = start_sector * disk->sector_size;
+    FILE * file = (FILE *)disk->data;
+
+    int err = fseek(file, offset, SEEK_SET);
+    if (err == -1) {
+        printf("seek disk failed: 0x%x\n", (int)offset);
+        return FS_ERR_IO;
+    }
+
+    err = (int)fwrite(buffer, disk->sector_size, count, file);
+    if (err == -1) {
+        printf("write disk failed:sector:%d, count:%d\n",(int)start_sector, (int)count);
+        return FS_ERR_IO;
+    }
+
+    // 刷新一下，即时写入
+    fflush(file);
+    return FS_ERR_OK;
 }
 
 /**
