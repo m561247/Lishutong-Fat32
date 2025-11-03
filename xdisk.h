@@ -26,11 +26,17 @@ typedef struct _xdisk_driver_t {
  * 存储设备类型
  */
 typedef struct _xdisk_t {
+    const char * name;              // 设备名称
     u32_t sector_size;              // 块大小
 	u32_t total_sector;             // 总的块数量
     xdisk_driver_t * driver;        // 驱动接口
     void * data;                    // 设备自定义参数
 }xdisk_t;
+
+xfat_err_t xdisk_open(xdisk_t *disk, const char * name, xdisk_driver_t * driver, void * init_data);
+xfat_err_t xdisk_close(xdisk_t * disk);
+xfat_err_t xdisk_read_sector(xdisk_t *disk, u8_t *buffer, u32_t start_sector, u32_t count);
+xfat_err_t xdisk_write_sector(xdisk_t *disk, u8_t *buffer, u32_t start_sector, u32_t count);
 
 #endif
 
