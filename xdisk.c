@@ -7,6 +7,8 @@
 #include "xfat.h"
 #include "xdisk.h"
 
+u8_t temp_buffer[512];
+
 /**
  * 初始化磁盘设备
  * @param disk 初始化的设备
@@ -80,4 +82,35 @@ xfat_err_t xdisk_write_sector(xdisk_t *disk, u8_t *buffer, u32_t start_sector, u
 
     err = disk->driver->write_sector(disk, buffer, start_sector, count);
     return err;
+}
+
+/**
+ * 获取设备上总的分区数量
+ * @param disk 查询的存储设备
+ * @param count 分区数存储的位置
+ * @return
+ */
+xfat_err_t xdisk_get_part_count(xdisk_t *disk, u32_t *count) {
+	int r_count = 0, i = 0;
+    mbr_part_t * part;
+    u8_t * disk_buffer = temp_buffer;
+
+    // 读取mbr区
+	int err = xdisk_read_sector(disk, disk_buffer, 0, 1);
+	if (err < 0) {
+		return err;
+	}
+
+	// 解析统计主分区的数量，并标记出哪个分区是扩展分区
+	part = ((mbr_t *)disk_buffer)->part_info;
+	for (i = 0; i < MBR_PRIMARY_PART_NR; i++, part++) {
+		if (part->system_id == FS_NOT_VALID) {
+            continue;
+        } else {
+            r_count++;
+        }
+	}
+
+    *count = r_count;
+	return FS_ERR_OK;
 }

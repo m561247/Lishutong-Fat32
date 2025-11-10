@@ -12,9 +12,12 @@
 extern xdisk_driver_t vdisk_driver;
 
 const char * disk_path_test = "disk_test.img";
+const char * disk_path = "disk.img";
 
 static u32_t write_buffer[160*1024];
 static u32_t read_buffer[160*1024];
+
+xdisk_t disk;
 
 // io测试，测试通过要注意关掉
 int disk_io_test (void) {
@@ -57,13 +60,21 @@ int disk_io_test (void) {
     return 0;
 }
 
-#pragma pack(1)
-typedef struct _mbr_t {
-    u32_t a;
-    u16_t b;
-    u32_t c;
-}mbr_t;
-#pragma pack()
+int disk_part_test (void) {
+    u32_t count;
+    xfat_err_t err = FS_ERR_OK;
+
+    printf("partition read test...\n");
+
+    err = xdisk_get_part_count(&disk, &count);
+    if (err < 0) {
+        printf("partion count detect failed!\n");
+        return err;
+    }
+    printf("partition count:%d\n", count);
+
+    return 0;
+}
 
 int main (void) {
     xfat_err_t err;
@@ -73,11 +84,23 @@ int main (void) {
         write_buffer[i] = i;
     }
 
-    //err = disk_io_test();
-    //if (err) return err;
+//    err = disk_io_test();
+//    if (err) return err;
 
-    mbr_t * mbr = (mbr_t *)0x100;
-    printf("%p\n", &(mbr->c));
+    err = xdisk_open(&disk, "vidsk", &vdisk_driver, (void *)disk_path);
+    if (err) {
+        printf("open disk failed!\n");
+        return -1;
+    }
+
+    err = disk_part_test();
+    if (err) return err;
+
+    err = xdisk_close(&disk);
+    if (err) {
+        printf("disk close failed!\n");
+        return -1;
+    }
 
     printf("Test End!\n");
     return 0;
