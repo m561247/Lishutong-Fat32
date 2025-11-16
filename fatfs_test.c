@@ -61,7 +61,7 @@ int disk_io_test (void) {
 }
 
 int disk_part_test (void) {
-    u32_t count;
+    u32_t count, i;
     xfat_err_t err = FS_ERR_OK;
 
     printf("partition read test...\n");
@@ -73,6 +73,20 @@ int disk_part_test (void) {
     }
     printf("partition count:%d\n", count);
 
+	for (i = 0; i < count; i++) {
+		xdisk_part_t part;
+		int err;
+
+		err = xdisk_get_part(&disk, &part, i);
+		if (err < 0) {
+			printf("read partion in failed:%d\n", i);
+			return -1;
+		}
+
+        printf("no %d: start: %d, count: %d, capacity:%.0f M\n",
+               i, part.start_sector, part.total_sector,
+               part.total_sector * disk.sector_size / 1024 / 1024.0);
+    }
     return 0;
 }
 

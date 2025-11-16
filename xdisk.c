@@ -176,3 +176,117 @@ xfat_err_t xdisk_get_part_count(xdisk_t *disk, u32_t *count) {
     *count = r_count;
 	return FS_ERR_OK;
 }
+
+/**
+ * 获取扩展下分区信息
+ * @param disk 查询的存储设备
+ * @param disk_part 分区信息存储的位置
+ * @param start_sector 扩展分区起始的绝对物理扇区
+ * @param part_no 查询的分区号
+ * @param count 该扩展分区下一共有多少个子分区
+ * @return
+ */
+static xfat_err_t disk_get_extend_part(xdisk_t * disk, xdisk_part_t * disk_part,
+                    u32_t start_sector, int part_no, u32_t * count) {
+    int curr_no = -1;
+    u8_t * disk_buffer = temp_buffer;
+    xfat_err_t err = FS_ERR_OK;
+
+    // 遍历整个扩展分区
+    u32_t ext_start_sector = start_sector;
+    do {
+        mbr_part_t * part;
+
+        // 读取扩展分区的mbr
+        err = xdisk_read_sector(disk, disk_buffer, start_sector, 1);
+        if (err < 0) {
+            return err;
+        }
+
+        part = ((mbr_t *)disk_buffer)->part_info;
+        if (part->system_id == FS_NOT_VALID) {  // 当前分区无效，设置未找到, 返回
+            err = FS_ERR_EOF;
+            break;
+        }
+
+        // 找到指定的分区号，计算出分区的绝对位置信息
+        if (++curr_no == part_no) {
+            disk_part->type = part->system_id;
+            disk_part->start_sector = start_sector + part->relative_sectors;
+            disk_part->total_sector = part->total_sectors;
+            disk_part->disk = disk;
+            break;
+        }
+
+        if ((++part)->system_id != FS_EXTEND) { // 无后续分区，设置未找到, 返回
+            err = FS_ERR_EOF;
+            break;
+        }
+
+        start_sector = ext_start_sector + part->relative_sectors;
+    } while (1);
+
+    *count = curr_no + 1;
+    return err;
+}
+
+/**
+ * 获取指定序号的分区信息
+ * 注意，该操作依赖物理分区分配，如果设备的分区结构有变化，则序号也会改变，得到的结果不同
+ * @param disk 存储设备
+ * @param part 分区信息存储的位置
+ * @param part_no 分区序号
+ * @return
+ */
+xfat_err_t xdisk_get_part(xdisk_t *disk, xdisk_part_t *xdisk_part, int part_no) {
+    int i;
+    int curr_no = -1;
+    mbr_part_t * mbr_part;
+	u8_t * disk_buffer = temp_buffer;
+
+	// 读取mbr
+	int err = xdisk_read_sector(disk, disk_buffer, 0, 1);
+	if (err < 0) {
+		return err;
+	}
+
+	// 遍历4个主分区描述
+    mbr_part = ((mbr_t *)disk_buffer)->part_info;
+	for (i = 0; i < MBR_PRIMARY_PART_NR; i++, mbr_part++) {
+		if (mbr_part->system_id == FS_NOT_VALID) {
+			continue;
+        }
+
+		// 如果是扩展分区，则进入查询子分区
+		if (mbr_part->system_id == FS_EXTEND) {
+            u32_t count = 0;
+            err = disk_get_extend_part(disk, xdisk_part, mbr_part->relative_sectors, part_no - i, &count);
+            if (err < 0) {      // 有错误
+                return err;
+            }
+
+            if (err == FS_ERR_OK) {      // 找到分区
+                return FS_ERR_OK;
+            } else {                    // 未找到，增加计数
+                curr_no += count;
+
+                // todo: 扩展分区的查询破坏了当前读取缓冲，所以此处再次读取
+                err = xdisk_read_sector(disk, disk_buffer, 0, 1);
+                if (err < 0) {
+                    return err;
+                }
+            }
+        } else {
+		    // 在主分区中找到，复制信息
+            if (++curr_no == part_no) {
+                xdisk_part->type = mbr_part->system_id;
+                xdisk_part->start_sector = mbr_part->relative_sectors;
+                xdisk_part->total_sector = mbr_part->total_sectors;
+                xdisk_part->disk = disk;
+                return FS_ERR_OK;
+            }
+        }
+	}
+
+	return FS_ERR_NONE;
+}

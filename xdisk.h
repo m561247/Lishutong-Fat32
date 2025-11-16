@@ -75,9 +75,20 @@ typedef struct _xdisk_t {
     void * data;                    // 设备自定义参数
 }xdisk_t;
 
+/**
+ * 存储设备分区类型
+ */
+typedef struct _xdisk_part_t {
+	u32_t start_sector;             // 相对于整个物理存储区开始的块序号
+	u32_t total_sector;             // 总的块数量
+	xfs_type_t type;                // 文件系统类型
+	xdisk_t * disk;                 // 对应的存储设备
+}xdisk_part_t;
+
 xfat_err_t xdisk_open(xdisk_t *disk, const char * name, xdisk_driver_t * driver, void * init_data);
 xfat_err_t xdisk_close(xdisk_t * disk);
 xfat_err_t xdisk_get_part_count(xdisk_t *disk, u32_t *count);
+xfat_err_t xdisk_get_part(xdisk_t *disk, xdisk_part_t *xdisk_part, int part_no);
 xfat_err_t xdisk_read_sector(xdisk_t *disk, u8_t *buffer, u32_t start_sector, u32_t count);
 xfat_err_t xdisk_write_sector(xdisk_t *disk, u8_t *buffer, u32_t start_sector, u32_t count);
 
