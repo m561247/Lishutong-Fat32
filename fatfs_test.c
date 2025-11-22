@@ -18,6 +18,7 @@ static u32_t write_buffer[160*1024];
 static u32_t read_buffer[160*1024];
 
 xdisk_t disk;
+xdisk_part_t disk_part;
 
 // io测试，测试通过要注意关掉
 int disk_io_test (void) {
@@ -78,7 +79,7 @@ int disk_part_test (void) {
 		int err;
 
 		err = xdisk_get_part(&disk, &part, i);
-		if (err < 0) {
+		if (err == -1) {
 			printf("read partion in failed:%d\n", i);
 			return -1;
 		}
@@ -109,6 +110,18 @@ int main (void) {
 
     err = disk_part_test();
     if (err) return err;
+
+    err = xdisk_get_part(&disk, &disk_part, 1);
+    if (err < 0) {
+        printf("read partition info failed!\n");
+        return -1;
+    }
+
+    err = xdisk_read_sector(&disk, (u8_t *)read_buffer, disk_part.start_sector, 1);
+    if (err) {
+        return err;
+    }
+    dbr_t * dbr = (dbr_t *)read_buffer;
 
     err = xdisk_close(&disk);
     if (err) {
