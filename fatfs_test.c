@@ -19,6 +19,7 @@ static u32_t read_buffer[160*1024];
 
 xdisk_t disk;
 xdisk_part_t disk_part;
+xfat_t xfat;
 
 // io测试，测试通过要注意关掉
 int disk_io_test (void) {
@@ -117,11 +118,10 @@ int main (void) {
         return -1;
     }
 
-    err = xdisk_read_sector(&disk, (u8_t *)read_buffer, disk_part.start_sector, 1);
-    if (err) {
+    err = xfat_open(&xfat, &disk_part);
+    if (err < 0) {
         return err;
     }
-    dbr_t * dbr = (dbr_t *)read_buffer;
 
     err = xdisk_close(&disk);
     if (err) {
