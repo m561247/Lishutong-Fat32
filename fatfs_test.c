@@ -5,13 +5,14 @@
  * 版权声明：本源码非开源，二次开发，或其它商用前请联系作者。
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "xdisk.h"
 #include "xfat.h"
 
 extern xdisk_driver_t vdisk_driver;
 
-const char * disk_path_test = "disk_test.img";
+const char * disk_path_test = "disk.img";
 const char * disk_path = "disk.img";
 
 static u32_t write_buffer[160*1024];
@@ -92,6 +93,101 @@ int disk_part_test (void) {
     return 0;
 }
 
+void show_dir_info (diritem_t * diritem) {
+    char file_name[12];
+    u8_t attr = diritem->DIR_Attr;
+
+    // name
+    memset(file_name, 0, sizeof(file_name));
+    memcpy(file_name, diritem->DIR_Name, 11);
+    if (file_name[0] == 0x05) {
+        file_name[0] = 0xE5;
+    }
+    printf("\n name: %s, ", file_name);
+
+    // attr
+    printf("\n\t");
+    if (attr & DIRITEM_ATTR_READ_ONLY) {
+        printf("readonly, ");
+    }
+
+    if (attr & DIRITEM_ATTR_HIDDEN) {
+        printf("hidden, ");
+    }
+
+    if (attr & DIRITEM_ATTR_SYSTEM) {
+        printf("system, ");
+    }
+
+    if (attr & DIRITEM_ATTR_DIRECTORY) {
+        printf("directory, ");
+    }
+
+    if (attr & DIRITEM_ATTR_ARCHIVE) {
+        printf("achinve, ");
+    }
+
+    // create time
+    printf("\n\tcreate:%d-%d-%d, ", diritem->DIR_CrtDate.year_from_1980 + 1980,
+            diritem->DIR_CrtDate.month, diritem->DIR_CrtDate.day);
+    printf("\n\time:%d-%d-%d, ", diritem->DIR_CrtTime.hour, diritem->DIR_CrtTime.minute,
+           diritem->DIR_CrtTime.second_2 * 2 + diritem->DIR_CrtTimeTeenth / 100);
+
+    // last write time
+    printf("\n\tlast write:%d-%d-%d, ", diritem->DIR_WrtDate.year_from_1980 + 1980,
+           diritem->DIR_WrtDate.month, diritem->DIR_WrtDate.day);
+    printf("\n\ttime:%d-%d-%d, ", diritem->DIR_WrtTime.hour,
+           diritem->DIR_WrtTime.minute, diritem->DIR_WrtTime.second_2 * 2);
+
+    // last acc time
+    printf("\n\tlast acc:%d-%d-%d, ", diritem->DIR_LastAccDate.year_from_1980 + 1980,
+           diritem->DIR_LastAccDate.month, diritem->DIR_LastAccDate.day);
+
+    // size
+    printf("\n\tsize %d kB, ", diritem->DIR_FileSize / 1024);
+    printf("\n\tcluster %d, ", (diritem->DIR_FstClusHI << 16) | diritem->DIR_FstClusL0);
+
+    printf("\n");
+}
+
+int fat_dir_test(void) {
+    int err;
+    u32_t curr_cluster;
+    u8_t * culster_buffer;
+    int index = 0;
+    diritem_t * dir_item;
+    u32_t j;
+
+    printf("root dir read test...\n");
+
+    culster_buffer = (u8_t *)malloc(xfat.cluster_byte_size);
+
+    // 解析根目录所在的簇
+    curr_cluster = xfat.root_cluster;
+
+    err = read_cluster(&xfat, culster_buffer, curr_cluster, 1);
+    if (err) {
+        printf("read cluster %d failed\n", curr_cluster);
+        return -1;
+    }
+
+    dir_item = (diritem_t *)culster_buffer;
+    for (j = 0; j < xfat.cluster_byte_size / sizeof(diritem_t); j++) {
+        u8_t  * name = (u8_t *)(dir_item[j].DIR_Name);
+        if (name[0] == DIRITEM_NAME_FREE) {
+            continue;
+        } else if (name[0] == DIRITEM_NAME_END) {
+            break;
+        }
+
+        index++;
+        printf("no: %d, ", index);
+        show_dir_info(&dir_item[j]);
+    }
+
+    return 0;
+}
+
 int main (void) {
     xfat_err_t err;
     int i;
@@ -122,6 +218,9 @@ int main (void) {
     if (err < 0) {
         return err;
     }
+
+    err = fat_dir_test();
+    if (err) return err;
 
     err = xdisk_close(&disk);
     if (err) {
