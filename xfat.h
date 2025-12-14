@@ -147,6 +147,8 @@ typedef enum _xfile_type_t {
     FAT_VOL,
 } xfile_type_t;
 
+#define SFN_LEN                     11              // sfn文件名长
+
 /**
  * 文件类型
  */

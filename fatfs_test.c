@@ -231,6 +231,8 @@ int fat_file_test(void) {
 }
 
 int fs_open_test (void) {
+    const char * not_exist_path = "/file_not_exist.txt";
+    const char * exist_path = "/12345678ABC";    // 注意：文件名要大写
     xfat_err_t err;
     xfile_t file;
 
@@ -239,6 +241,19 @@ int fs_open_test (void) {
     err = xfile_open(&xfat, &file, "/");
     if (err) {
         printf("open file failed %s!\n", "/");
+        return -1;
+    }
+    xfile_close(&file);
+
+    err = xfile_open(&xfat, &file, not_exist_path);
+    if (err == 0) {
+        printf("open file ok %s!\n", not_exist_path);
+        return -1;
+    }
+
+    err = xfile_open(&xfat, &file, exist_path);
+    if (err < 0) {
+        printf("open file failed %s!\n", exist_path);
         return -1;
     }
     xfile_close(&file);
