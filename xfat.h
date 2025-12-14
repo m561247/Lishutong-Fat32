@@ -140,8 +140,8 @@ typedef struct _xfat_t {
 
 xfat_err_t is_cluster_valid(u32_t cluster);
 xfat_err_t get_next_cluster(xfat_t *xfat, u32_t curr_cluster_no, u32_t *next_cluster);
+xfat_err_t read_cluster(xfat_t *xfat, u8_t *buffer, u32_t cluster, u32_t count);
 
 xfat_err_t xfat_open(xfat_t * xfat, xdisk_part_t * xdisk_part);
-xfat_err_t read_cluster(xfat_t *xfat, u8_t *buffer, u32_t cluster, u32_t count);
 
 #endif /* XFAT_H */

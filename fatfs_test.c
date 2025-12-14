@@ -12,7 +12,7 @@
 
 extern xdisk_driver_t vdisk_driver;
 
-const char * disk_path_test = "disk.img";
+const char * disk_path_test = "disk_test.img";
 const char * disk_path = "disk.img";
 
 static u32_t write_buffer[160*1024];
@@ -195,6 +195,41 @@ int fat_dir_test(void) {
     return 0;
 }
 
+int fat_file_test(void) {
+    int err;
+    u32_t curr_cluster;
+    u8_t * culster_buffer;
+    int size = 0;
+
+    printf("root dir read test...\n");
+
+    culster_buffer = (u8_t *)malloc(xfat.cluster_byte_size + 1);
+
+    // 从fat_dir_test选择1个文件的cluster起始号，根据测试情况修改
+    curr_cluster = 4565;    // 62.txt
+    while (is_cluster_valid(curr_cluster)) {
+        err = read_cluster(&xfat, culster_buffer, curr_cluster, 1);
+        if (err) {
+            printf("read cluster %d failed\n", curr_cluster);
+            return -1;
+        }
+
+        // print file content
+        culster_buffer[xfat.cluster_byte_size + 1] = '\0';
+        printf("%s", (char *)culster_buffer);
+
+        size += xfat.cluster_byte_size;
+        err = get_next_cluster(&xfat, curr_cluster, &curr_cluster);
+        if (err) {
+            printf("get next cluster failed， current cluster %d\n", curr_cluster);
+            return -1;
+        }
+    }
+
+    printf("\nfile size:%d\n", size);
+    return 0;
+}
+
 int main (void) {
     xfat_err_t err;
     int i;
@@ -227,6 +262,9 @@ int main (void) {
     }
 
     err = fat_dir_test();
+    if (err) return err;
+
+    err = fat_file_test();
     if (err) return err;
 
     err = xdisk_close(&disk);
