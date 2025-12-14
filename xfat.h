@@ -138,10 +138,38 @@ typedef struct _xfat_t {
     xdisk_part_t * disk_part;           // 对应的分区信息
 } xfat_t;
 
+/**
+ * 文件类型
+ */
+typedef enum _xfile_type_t {
+    FAT_DIR,
+    FAT_FILE,
+    FAT_VOL,
+} xfile_type_t;
+
+/**
+ * 文件类型
+ */
+typedef struct _xfile_t {
+    xfat_t *xfat;                   // 对应的xfat结构
+
+    u32_t size;                     // 文件大小
+    u16_t attr;                     // 文件属性
+    xfile_type_t type;              // 文件类型
+    u32_t pos;                      // 当前位置
+    xfat_err_t err;                  // 上一次的操作错误码
+
+    u32_t start_cluster;            // 数据区起始簇号
+    u32_t curr_cluster;             // 当前簇号
+} xfile_t;
+
 xfat_err_t is_cluster_valid(u32_t cluster);
 xfat_err_t get_next_cluster(xfat_t *xfat, u32_t curr_cluster_no, u32_t *next_cluster);
 xfat_err_t read_cluster(xfat_t *xfat, u8_t *buffer, u32_t cluster, u32_t count);
 
 xfat_err_t xfat_open(xfat_t * xfat, xdisk_part_t * xdisk_part);
+
+xfat_err_t xfile_open(xfat_t * xfat, xfile_t *file, const char *path);
+xfat_err_t xfile_close(xfile_t *file);
 
 #endif /* XFAT_H */

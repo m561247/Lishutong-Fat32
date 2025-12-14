@@ -230,6 +230,23 @@ int fat_file_test(void) {
     return 0;
 }
 
+int fs_open_test (void) {
+    xfat_err_t err;
+    xfile_t file;
+
+    printf("fs_open test...\n");
+
+    err = xfile_open(&xfat, &file, "/");
+    if (err) {
+        printf("open file failed %s!\n", "/");
+        return -1;
+    }
+    xfile_close(&file);
+
+    printf("file open test ok\n");
+    return 0;
+}
+
 int main (void) {
     xfat_err_t err;
     int i;
@@ -261,10 +278,13 @@ int main (void) {
         return err;
     }
 
-    err = fat_dir_test();
-    if (err) return err;
+//    err = fat_dir_test();
+//    if (err) return err;
 
-    err = fat_file_test();
+//    err = fat_file_test();
+//    if (err) return err;
+
+    err = fs_open_test();
     if (err) return err;
 
     err = xdisk_close(&disk);

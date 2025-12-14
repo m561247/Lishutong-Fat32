@@ -142,3 +142,45 @@ xfat_err_t read_cluster(xfat_t *xfat, u8_t *buffer, u32_t cluster, u32_t count) 
 
     return FS_ERR_OK;
 }
+
+/**
+ * 打开指定dir_cluster开始的簇链中包含的子文件。
+ * 如果path为空，则以dir_cluster创建一个打开的目录对像
+ * @param xfat xfat结构
+ * @param dir_cluster 查找的顶层目录的起始簇链
+ * @param file 打开的文件file结构
+ * @param path 以dir_cluster所对应的目录为起点的完整路径
+ * @return
+ */
+static xfat_err_t open_sub_file (xfat_t * xfat, u32_t dir_cluster, xfile_t * file, const char * path) {
+    file->size = 0;
+    file->type = FAT_DIR;
+    file->start_cluster = dir_cluster;
+    file->curr_cluster = dir_cluster;
+
+    file->xfat = xfat;
+    file->pos = 0;
+    file->err = FS_ERR_OK;
+    file->attr = 0;
+    return FS_ERR_OK;
+}
+
+/**
+ * 打开指定的文件或目录
+ * @param xfat xfat结构
+ * @param file 打开的文件或目录
+ * @param path 文件或目录所在的完整路径
+ * @return
+ */
+xfat_err_t xfile_open(xfat_t * xfat, xfile_t * file, const char * path) {
+    return open_sub_file(xfat, xfat->root_cluster, file, path);
+}
+
+/**
+ * 关闭已经打开的文件
+ * @param file 待关闭的文件
+ * @return
+ */
+xfat_err_t xfile_close(xfile_t *file) {
+    return FS_ERR_OK;
+}
