@@ -4,6 +4,7 @@
  * 课程网址：http://01ketang.cc
  * 版权声明：本源码非开源，二次开发，或其它商用前请联系作者。
  */
+#include <stdlib.h>
 #include "xfat.h"
 #include "xdisk.h"
 
@@ -66,6 +67,13 @@ xfat_err_t xfat_open(xfat_t * xfat, xdisk_part_t * xdisk_part) {
         return err;
     }
 
+    // 先一次性全部读取FAT表: todo: 优化
+    xfat->fat_buffer = (u8_t *)malloc(xfat->fat_tbl_sectors * xdisk->sector_size);
+    err = xdisk_read_sector(xdisk, (u8_t *)xfat->fat_buffer, xfat->fat_start_sector, xfat->fat_tbl_sectors);
+    if (err < 0) {
+        return err;
+    }
+
     return FS_ERR_OK;
 }
 
@@ -78,6 +86,34 @@ xfat_err_t xfat_open(xfat_t * xfat, xdisk_part_t * xdisk_part) {
 u32_t cluster_fist_sector(xfat_t *xfat, u32_t cluster_no) {
     u32_t data_start_sector = xfat->fat_start_sector + xfat->fat_tbl_sectors * xfat->fat_tbl_nr;
     return data_start_sector + (cluster_no - 2) * xfat->sec_per_cluster;    // 前两个簇号保留
+}
+
+/**
+ * 检查指定簇是否可用，非占用或坏簇
+ * @param cluster 待检查的簇
+ * @return
+ */
+int is_cluster_valid(u32_t cluster) {
+    cluster &= 0x0FFFFFFF;
+    return (cluster < 0x0FFFFFF0) && (cluster >= 0x2);     // 值是否正确
+}
+
+/**
+ * 获取指定簇的下一个簇
+ * @param xfat xfat结构
+ * @param curr_cluster_no
+ * @param next_cluster
+ * @return
+ */
+xfat_err_t get_next_cluster(xfat_t * xfat, u32_t curr_cluster_no, u32_t * next_cluster) {
+    if (is_cluster_valid(curr_cluster_no)) {
+        cluster32_t * cluster32_buf = (cluster32_t *)xfat->fat_buffer;
+        *next_cluster = cluster32_buf[curr_cluster_no].s.next;
+    } else {
+        *next_cluster = CLUSTER_INVALID;
+    }
+
+    return FS_ERR_OK;
 }
 
 /**

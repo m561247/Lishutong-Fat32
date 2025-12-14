@@ -164,25 +164,32 @@ int fat_dir_test(void) {
 
     // 解析根目录所在的簇
     curr_cluster = xfat.root_cluster;
-
-    err = read_cluster(&xfat, culster_buffer, curr_cluster, 1);
-    if (err) {
-        printf("read cluster %d failed\n", curr_cluster);
-        return -1;
-    }
-
-    dir_item = (diritem_t *)culster_buffer;
-    for (j = 0; j < xfat.cluster_byte_size / sizeof(diritem_t); j++) {
-        u8_t  * name = (u8_t *)(dir_item[j].DIR_Name);
-        if (name[0] == DIRITEM_NAME_FREE) {
-            continue;
-        } else if (name[0] == DIRITEM_NAME_END) {
-            break;
+    while (is_cluster_valid(curr_cluster)) {
+        err = read_cluster(&xfat, culster_buffer, curr_cluster, 1);
+        if (err) {
+            printf("read cluster %d failed\n", curr_cluster);
+            return -1;
         }
 
-        index++;
-        printf("no: %d, ", index);
-        show_dir_info(&dir_item[j]);
+        dir_item = (diritem_t *)culster_buffer;
+        for (j = 0; j < xfat.cluster_byte_size / sizeof(diritem_t); j++) {
+            u8_t  * name = (u8_t *)(dir_item[j].DIR_Name);
+            if (name[0] == DIRITEM_NAME_FREE) {
+                continue;
+            } else if (name[0] == DIRITEM_NAME_END) {
+                break;
+            }
+
+            index++;
+            printf("no: %d, ", index);
+            show_dir_info(&dir_item[j]);
+        }
+
+        err = get_next_cluster(&xfat, curr_cluster, &curr_cluster);
+        if (err) {
+            printf("get next cluster failed， current cluster %d\n", curr_cluster);
+            return -1;
+        }
     }
 
     return 0;
