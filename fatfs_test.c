@@ -230,6 +230,79 @@ int fat_file_test(void) {
     return 0;
 }
 
+void show_file_info(xfileinfo_t * fileinfo) {
+    printf("\n\nname: %s, ", fileinfo->file_name);
+    switch (fileinfo->type) {
+        case FAT_FILE:
+            printf("file, ");
+            break;
+        case FAT_DIR:
+            printf("dir, ");
+            break;
+        case FAT_VOL:
+            printf("vol, ");
+            break;
+        default:
+            printf("unknown, ");
+            break;
+    }
+
+    // create time
+    printf("\n\tcreate:%d-%d-%d, ", fileinfo->create_time.year, fileinfo->create_time.month, fileinfo->create_time.day);
+    printf("\n\ttime:%d-%d-%d, ", fileinfo->create_time.hour, fileinfo->create_time.minute, fileinfo->create_time.second);
+
+    // last write time
+    printf("\n\tlast write:%d-%d-%d, ", fileinfo->modify_time.year, fileinfo->modify_time.month, fileinfo->modify_time.day);
+    printf("\n\ttime:%d-%d-%d, ", fileinfo->modify_time.hour, fileinfo->modify_time.minute, fileinfo->modify_time.second);
+
+    // last acc time
+    printf("\n\tlast acc:%d-%d-%d, ", fileinfo->last_acctime.year, fileinfo->last_acctime.month, fileinfo->last_acctime.day);
+
+    // size
+    printf("\n\tsize %d kB, ", fileinfo->size / 1024);
+
+    printf("\n");
+}
+
+int dir_trans_test(void) {
+    xfile_t top_dir;
+    xfileinfo_t fileinfo;
+    int err;
+
+    printf("\ntrans dir test!\n");
+
+    // 仅遍历根目录下面的这一层
+    err = xfile_open(&xfat, &top_dir, "/");
+    if (err < 0) {
+        printf("open directory failed!\n");
+        return -1;
+    }
+
+    err = xdir_first_file(&top_dir, &fileinfo);
+    if (err < 0) {
+        printf("get file info failed!\n");
+        return -1;
+    }
+    show_file_info(&fileinfo);
+
+    while ((err = xdir_next_file(&top_dir, &fileinfo)) == 0) {
+        show_file_info(&fileinfo);
+    }
+    if (err < 0) {
+        printf("get file info failed!\n");
+        return -1;
+    }
+
+    err = xfile_close(&top_dir);
+    if (err < 0) {
+        printf("close file failed!\n");
+        return -1;
+    }
+
+    printf("file trans test ok\n");
+    return 0;
+}
+
 int fs_open_test (void) {
     const char * not_exist_path = "/file_not_exist.txt";
     const char * exist_path = "/12345678ABC";    // 注意：文件名要大写
@@ -315,7 +388,10 @@ int main (void) {
 //    err = fat_file_test();
 //    if (err) return err;
 
-    err = fs_open_test();
+//    err = fs_open_test();
+//    if (err) return err;
+
+    err = dir_trans_test();
     if (err) return err;
 
     err = xdisk_close(&disk);

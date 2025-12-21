@@ -16,6 +16,7 @@ extern u8_t temp_buffer[512];      // todo: 缓存优化
 #define xfat_get_disk(xfat)     ((xfat)->disk_part->disk)               // 获取disk结构
 #define to_sector(disk, offset)     ((offset) / (disk)->sector_size)    // 将依稀转换为扇区号
 #define to_sector_offset(disk, offset)   ((offset) % (disk)->sector_size)   // 获取扇区中的相对偏移
+#define to_cluster_offset(xfat, pos)      ((pos) % ((xfat)->cluster_byte_size)) // 获取簇中的相对偏移
 
 /**
  * 从dbr中解析出fat相关配置参数
@@ -275,12 +276,91 @@ static xfile_type_t get_file_type(const diritem_t *diritem) {
 }
 
 /**
+ * 复制相应的时间信息到dest中
+ * @param dest 指定存储的时间信息结构
+ * @param date fat格式的日期
+ * @param time fat格式的时间
+ * @param mil_sec fat格式的10毫秒
+ */
+static void copy_date_time(xfile_time_t *dest, const diritem_date_t *date,
+                           const diritem_time_t *time, const u8_t mil_sec) {
+    if (date) {
+        dest->year = (u16_t)(date->year_from_1980 + 1980);
+        dest->month = (u8_t)date->month;
+        dest->day = (u8_t)date->day;
+    } else {
+        dest->year = 0;
+        dest->month = 0;
+        dest->day = 0;
+    }
+
+    if (time) {
+        dest->hour = (u8_t)time->hour;
+        dest->minute = (u8_t)time->minute;
+        dest->second = (u8_t)(time->second_2 * 2 + mil_sec / 100);
+    } else {
+        dest->hour = 0;
+        dest->minute = 0;
+        dest->second = 0;
+    }
+}
+
+/**
+ * 从fat_dir格式的文件名中拷贝成用户可读的文件名到dest_name
+ * @param dest_name 转换后的文件名存储缓冲区
+ * @param raw_name fat_dir格式的文件名
+ */
+static void sfn_to_myname(char *dest_name, const diritem_t * diritem) {
+    int i;
+    char * dest = dest_name, * raw_name = (char *)diritem->DIR_Name;
+    u8_t ext_exist = raw_name[8] != 0x20;
+    u8_t scan_len = ext_exist ? SFN_LEN + 1 : SFN_LEN;
+
+    memset(dest_name, 0, X_FILEINFO_NAME_SIZE);   
+
+    // 要考虑大小写问题，根据NTRes配置转换成相应的大小写
+    for (i = 0; i < scan_len; i++) {
+        if (*raw_name == ' ') {
+            raw_name++;
+        } else if ((i == 8) && ext_exist) {
+           *dest++ = '.';
+        } else {
+            u8_t lower = 0;
+
+            if (((i < 8) && (diritem->DIR_NTRes & DIRITEM_NTRES_BODY_LOWER))
+                || ((i > 8) && (diritem->DIR_NTRes & DIRITEM_NTRES_EXT_LOWER))) {
+                lower = 1;
+            }
+
+            *dest++ = lower ? tolower(*raw_name++) : toupper(*raw_name++);
+        }
+    }
+    *dest = '\0';
+}
+
+/**
  * 获取diritem的文件起始簇号
  * @param item
  * @return
  */
 static u32_t get_diritem_cluster (diritem_t * item) {
     return (item->DIR_FstClusHI << 16) | item->DIR_FstClusL0;
+}
+
+/**
+ * 将dir_item中相应的文件信息转换存至fs_fileinfo_t中
+ * @param info 信息存储的位置
+ * @param dir_item fat的diritem
+ */
+static void copy_file_info(xfileinfo_t *info, const diritem_t * dir_item) {
+    sfn_to_myname(info->file_name, dir_item);
+    info->size = dir_item->DIR_FileSize;
+    info->attr = dir_item->DIR_Attr;
+    info->type = get_file_type(dir_item);
+
+    copy_date_time(&info->create_time, &dir_item->DIR_CrtDate, &dir_item->DIR_CrtTime, dir_item->DIR_CrtTimeTeenth);
+    copy_date_time(&info->last_acctime, &dir_item->DIR_LastAccDate, (diritem_time_t *) 0, 0) ;
+    copy_date_time(&info->modify_time, &dir_item->DIR_WrtDate, &dir_item->DIR_WrtTime, 0);
 }
 
 /**
@@ -429,6 +509,86 @@ static xfat_err_t open_sub_file (xfat_t * xfat, u32_t dir_cluster, xfile_t * fil
  */
 xfat_err_t xfile_open(xfat_t * xfat, xfile_t * file, const char * path) {
     return open_sub_file(xfat, xfat->root_cluster, file, path);
+}
+
+/**
+ * 返回指定目录下的第一个文件信息
+ * @param file 已经打开的文件
+ * @param info 第一个文件的文件信息
+ * @return
+ */
+xfat_err_t xdir_first_file (xfile_t * file, xfileinfo_t * info) {
+    diritem_t * diritem = (diritem_t *)0;
+    xfat_err_t err;
+    u32_t moved_bytes = 0;
+    u32_t cluster_offset;
+
+    // 仅能用于目录下搜索
+    if (file->type != FAT_DIR) {
+        return FS_ERR_PARAM;
+    }
+
+    // 重新调整搜索位置
+    file->curr_cluster = file->start_cluster;
+    file->pos = 0;
+
+    cluster_offset = 0;
+    err = locate_file_dir_item(file->xfat, &file->curr_cluster, &cluster_offset, "", &moved_bytes, &diritem);
+    if (err < 0) {
+        return err;
+    }
+
+    if (diritem == (diritem_t *)0) {
+        return FS_ERR_EOF;
+    }
+
+    file->pos += moved_bytes;
+
+    // 找到后，拷贝文件信息
+    copy_file_info(info, diritem);
+    return err;
+}
+
+/**
+ * 返回指定目录接下来的文件（用于文件遍历)
+ * @param file 已经打开的目录
+ * @param info 获得的文件信息
+ * @return
+ */
+xfat_err_t xdir_next_file (xfile_t * file, xfileinfo_t * info) {
+    xfat_err_t err;
+    diritem_t * dir_item = (diritem_t *)0;
+    u32_t moved_bytes = 0;
+    u32_t cluster_offset;
+
+    // 仅用于目录
+    if (file->type != FAT_DIR) {
+        return FS_ERR_PARAM;
+    }
+
+    // 搜索文件或目录
+    cluster_offset = to_cluster_offset(file->xfat, file->pos);
+    err = locate_file_dir_item(file->xfat,  &file->curr_cluster, &cluster_offset, "", &moved_bytes, &dir_item);
+    if (err != FS_ERR_OK) {
+        return err;
+    }
+
+    if (dir_item == (diritem_t *)0) {
+        return FS_ERR_EOF;
+    }
+
+    file->pos += moved_bytes;
+
+    // 移动位置后，可能超过当前簇，更新当前簇位置
+    if (cluster_offset + sizeof(diritem_t) >= file->xfat->cluster_byte_size) {
+        err = get_next_cluster(file->xfat, file->curr_cluster, &file->curr_cluster);
+        if (err < 0) {
+            return err;
+        }
+    }
+
+    copy_file_info(info, dir_item);
+    return err;
 }
 
 /**

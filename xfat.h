@@ -142,6 +142,18 @@ typedef struct _xfat_t {
 } xfat_t;
 
 /**
+ * 时间描述结构
+ */
+typedef struct _xfile_time_t {
+    u16_t year;
+    u8_t month;
+    u8_t day;
+    u8_t hour;
+    u8_t minute;
+    u8_t second;
+}xfile_time_t;
+
+/**
  * 文件类型
  */
 typedef enum _xfile_type_t {
@@ -151,6 +163,21 @@ typedef enum _xfile_type_t {
 } xfile_type_t;
 
 #define SFN_LEN                     11              // sfn文件名长
+
+/**
+ * 文件信息结构
+ */
+typedef struct _xfileinfo_t {
+#define X_FILEINFO_NAME_SIZE        32
+    char file_name[X_FILEINFO_NAME_SIZE];       // 文件名
+
+    u32_t size;                                 // 文件字节大小
+    u16_t attr;                                 // 文件属性
+    xfile_type_t type;                          // 文件类型
+    xfile_time_t create_time;                       // 创建时间
+    xfile_time_t last_acctime;                      // 最后访问时间
+    xfile_time_t modify_time;                       // 最后修改时间
+} xfileinfo_t;
 
 /**
  * 文件类型
@@ -176,5 +203,7 @@ xfat_err_t xfat_open(xfat_t * xfat, xdisk_part_t * xdisk_part);
 
 xfat_err_t xfile_open(xfat_t * xfat, xfile_t *file, const char *path);
 xfat_err_t xfile_close(xfile_t *file);
+xfat_err_t xdir_first_file(xfile_t *file, xfileinfo_t *info);
+xfat_err_t xdir_next_file(xfile_t *file, xfileinfo_t *info);
 
 #endif /* XFAT_H */
