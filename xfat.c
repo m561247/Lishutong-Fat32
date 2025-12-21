@@ -6,6 +6,7 @@
  */
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include "xfat.h"
 #include "xdisk.h"
 
@@ -148,13 +149,79 @@ xfat_err_t read_cluster(xfat_t *xfat, u8_t *buffer, u32_t cluster, u32_t count) 
 }
 
 /**
+ * 将指定的name按FAT 8+3命名转换
+ * @param dest_name
+ * @param my_name
+ * @return
+ */
+static xfat_err_t to_sfn(char* dest_name, const char* my_name) {
+    int i, name_len;
+    char * dest = dest_name;
+    const char * ext_dot;
+    const char * p;
+    int ext_existed;
+
+    memset(dest, ' ', SFN_LEN);
+
+    // 跳过开头的分隔符
+    while (is_path_sep(*my_name)) {
+        my_name++;
+    }
+
+    // 找到第一个斜杠之前的字符串，将ext_dot定位到那里，且记录有效长度
+    ext_dot = my_name;
+    p = my_name;
+    name_len = 0;
+    while ((*p != '\0') && !is_path_sep(*p)) {
+        if (*p == '.') {
+            ext_dot = p;
+        }
+        p++;
+        name_len++;
+    }
+
+    // 如果文件名以.结尾，意思就是没有扩展名？
+    // todo: 长文件名处理?
+    ext_existed = (ext_dot > my_name) && (ext_dot < (my_name + name_len - 1));
+
+    // 遍历名称，逐个复制字符, 算上.分隔符，最长12字节，如果分离符，则只应有
+    p = my_name;
+    for (i = 0; (i < SFN_LEN) && (*p != '\0') && !is_path_sep(*p); i++) {
+        if (ext_existed) {
+            if (p == ext_dot) {
+                dest = dest_name + 8;
+                p++;
+                i--;
+                continue;
+            }
+            else if (p < ext_dot) {
+                *dest++ = toupper(*p++);
+            }
+            else {
+                *dest++ = toupper(*p++);
+            }
+        }
+        else {
+            *dest++ = toupper(*p++);
+        }
+    }
+    return FS_ERR_OK;
+}
+
+/**
  * 判断两个文件名是否匹配
- * @param name_in_dir fatdir中的文件名格式
- * @param to_find_name 应用可读的文件名格式
+ * @param name_in_item fatdir中的文件名格式
+ * @param my_name 应用可读的文件名格式
  * @return
  */
 static u8_t is_filename_match(const char *name_in_dir, const char *to_find_name) {
-    return memcmp(to_find_name, name_in_dir, SFN_LEN) == 0;
+    char temp_name[SFN_LEN];
+
+    // FAT文件名的比较检测等，全部转换成大写比较
+    // 根据目录的大小写配置，将其转换成8+3名称，再进行逐字节比较
+    // 但实际显示时，会根据diritem->NTRes进行大小写转换
+    to_sfn(temp_name, to_find_name);
+    return memcmp(temp_name, name_in_dir, SFN_LEN) == 0;
 }
 
 /**
