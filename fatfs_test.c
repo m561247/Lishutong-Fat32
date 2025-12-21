@@ -272,7 +272,7 @@ int dir_trans_test(void) {
     printf("\ntrans dir test!\n");
 
     // 仅遍历根目录下面的这一层
-    err = xfile_open(&xfat, &top_dir, "/");
+    err = xfile_open(&xfat, &top_dir, "/read/..");
     if (err < 0) {
         printf("open directory failed!\n");
         return -1;

@@ -12,6 +12,10 @@
 
 extern u8_t temp_buffer[512];      // todo: 缓存优化
 
+// 内置的.和..文件名             "12345678ext"
+#define DOT_FILE                ".          "
+#define DOT_DOT_FILE            "..         "
+
 #define is_path_sep(ch)         (((ch) == '\\') || ((ch == '/')))       // 判断是否是文件名分隔符
 #define xfat_get_disk(xfat)     ((xfat)->disk_part->disk)               // 获取disk结构
 #define to_sector(disk, offset)     ((offset) / (disk)->sector_size)    // 将依稀转换为扇区号
@@ -364,8 +368,35 @@ static void copy_file_info(xfileinfo_t *info, const diritem_t * dir_item) {
 }
 
 /**
+ * 检查文件名和类型是否匹配
+ * @param dir_item
+ * @param locate_type
+ * @return
+ */
+static u8_t is_locate_type_match (diritem_t * dir_item, u8_t locate_type) {
+    u8_t match = 1;
+
+    if ((dir_item->DIR_Attr & DIRITEM_ATTR_SYSTEM) && !(locate_type & XFILE_LOCALE_SYSTEM)) {
+        match = 0;  // 不显示系统文件
+    } else if ((dir_item->DIR_Attr & DIRITEM_ATTR_HIDDEN) && !(locate_type & XFILE_LOCATE_HIDDEN)) {
+        match = 0;  // 不显示隐藏文件
+    } else if ((dir_item->DIR_Attr & DIRITEM_ATTR_VOLUME_ID) && !(locate_type & XFILE_LOCATE_VOL)) {
+        match = 0;  // 不显示卷标
+    } else if ((memcmp(DOT_FILE, dir_item->DIR_Name, SFN_LEN) == 0)
+                || (memcmp(DOT_DOT_FILE, dir_item->DIR_Name, SFN_LEN) == 0)) {
+        if (!(locate_type & XFILE_LOCATE_DOT)) {
+            match = 0;// 不显示dot文件
+        }
+    } else if (!(locate_type & XFILE_LOCATE_NORMAL)) {
+        match = 0;
+    }
+    return match;
+}
+
+/**
  * 查找指定dir_item，并返回相应的结构
  * @param xfat xfat结构
+ * @param locate_type 定位的item类型
  * @param dir_cluster dir_item所在的目录数据簇号
  * @param cluster_offset 簇中的偏移
  * @param move_bytes 查找到相应的item项后，相对于最开始传入的偏移值，移动了多少个字节才定位到该item
@@ -373,7 +404,7 @@ static void copy_file_info(xfileinfo_t *info, const diritem_t * dir_item) {
  * @param r_diritem 查找到的diritem项
  * @return
  */
-static xfat_err_t locate_file_dir_item(xfat_t *xfat, u32_t *dir_cluster, u32_t *cluster_offset,
+static xfat_err_t locate_file_dir_item(xfat_t *xfat, u8_t locate_type, u32_t *dir_cluster, u32_t *cluster_offset,
                                     const char *path, u32_t *move_bytes, diritem_t **r_diritem) {
     u32_t curr_cluster = *dir_cluster;
     xdisk_t * xdisk = xfat_get_disk(xfat);
@@ -401,6 +432,9 @@ static xfat_err_t locate_file_dir_item(xfat_t *xfat, u32_t *dir_cluster, u32_t *
                 if (dir_item->DIR_Name[0] == DIRITEM_NAME_END) {
                     return FS_ERR_EOF;
                 } else if (dir_item->DIR_Name[0] == DIRITEM_NAME_FREE) {
+                    r_move_bytes += sizeof(diritem_t);
+                    continue;
+                } else if (!is_locate_type_match(dir_item, locate_type)) {
                     r_move_bytes += sizeof(diritem_t);
                     continue;
                 }
@@ -464,8 +498,8 @@ static xfat_err_t open_sub_file (xfat_t * xfat, u32_t dir_cluster, xfile_t * fil
             dir_item = (diritem_t *)0;
 
             // 在父目录下查找指定路径对应的文件
-            xfat_err_t err = locate_file_dir_item(xfat, &parent_cluster, &parent_cluster_offset,
-                                                curr_path, &moved_bytes, &dir_item);
+            xfat_err_t err = locate_file_dir_item(xfat, XFILE_LOCATE_DOT | XFILE_LOCATE_NORMAL,
+                    &parent_cluster, &parent_cluster_offset,curr_path, &moved_bytes, &dir_item);
             if (err < 0) {
                 return err;
             }
@@ -479,7 +513,12 @@ static xfat_err_t open_sub_file (xfat_t * xfat, u32_t dir_cluster, xfile_t * fil
                 parent_cluster = get_diritem_cluster(dir_item);
                 parent_cluster_offset = 0;
             } else {
-                file_start_cluster = get_diritem_cluster(dir_item);;
+                file_start_cluster = get_diritem_cluster(dir_item);
+
+                // 如果是..且对应根目录，则cluster值为0，需加载正确的值
+                if ((memcmp(dir_item->DIR_Name, DOT_DOT_FILE, SFN_LEN) == 0) && (file_start_cluster == 0)) {
+                    file_start_cluster = xfat->root_cluster;
+                }
             }
         }
 
@@ -504,10 +543,20 @@ static xfat_err_t open_sub_file (xfat_t * xfat, u32_t dir_cluster, xfile_t * fil
  * 打开指定的文件或目录
  * @param xfat xfat结构
  * @param file 打开的文件或目录
- * @param path 文件或目录所在的完整路径
+ * @param path 文件或目录所在的完整路径，暂不支持相对路径
  * @return
  */
 xfat_err_t xfile_open(xfat_t * xfat, xfile_t * file, const char * path) {
+	path = skip_first_path_sep(path);
+
+	// 根目录不存在上级目录
+	// 若含有.，直接过滤掉路径
+	if (memcmp(path, "..", 2) == 0) {
+		return FS_ERR_NONE;
+	} else if (memcmp(path, ".", 1) == 0) {
+		path++;
+	}
+
     return open_sub_file(xfat, xfat->root_cluster, file, path);
 }
 
@@ -533,7 +582,8 @@ xfat_err_t xdir_first_file (xfile_t * file, xfileinfo_t * info) {
     file->pos = 0;
 
     cluster_offset = 0;
-    err = locate_file_dir_item(file->xfat, &file->curr_cluster, &cluster_offset, "", &moved_bytes, &diritem);
+    err = locate_file_dir_item(file->xfat, XFILE_LOCATE_NORMAL,
+            &file->curr_cluster, &cluster_offset, "", &moved_bytes, &diritem);
     if (err < 0) {
         return err;
     }
@@ -568,7 +618,8 @@ xfat_err_t xdir_next_file (xfile_t * file, xfileinfo_t * info) {
 
     // 搜索文件或目录
     cluster_offset = to_cluster_offset(file->xfat, file->pos);
-    err = locate_file_dir_item(file->xfat,  &file->curr_cluster, &cluster_offset, "", &moved_bytes, &dir_item);
+    err = locate_file_dir_item(file->xfat, XFILE_LOCATE_NORMAL,
+            &file->curr_cluster, &cluster_offset, "", &moved_bytes, &dir_item);
     if (err != FS_ERR_OK) {
         return err;
     }

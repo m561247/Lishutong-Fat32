@@ -164,6 +164,13 @@ typedef enum _xfile_type_t {
 
 #define SFN_LEN                     11              // sfn文件名长
 
+#define XFILE_LOCATE_NORMAL         (1 << 0)        // 查找普通文件
+#define XFILE_LOCATE_DOT            (1 << 1)        // 查找.和..文件
+#define XFILE_LOCATE_VOL            (1 << 2)        // 查找卷标
+#define XFILE_LOCALE_SYSTEM         (1 << 3)        // 查找系统文件
+#define XFILE_LOCATE_HIDDEN         (1 << 4)        // 查找隐藏文件
+#define XFILE_LOCATE_ALL            0xFF            // 查找所有
+
 /**
  * 文件信息结构
  */
