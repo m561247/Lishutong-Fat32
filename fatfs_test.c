@@ -264,6 +264,44 @@ void show_file_info(xfileinfo_t * fileinfo) {
     printf("\n");
 }
 
+int list_sub_files (xfile_t * file, int curr_depth) {
+    int err = 0;
+    int i;
+    xfileinfo_t fileinfo;
+
+    err = xdir_first_file(file, &fileinfo);
+    if (err)  return err;
+
+    do {
+        xfile_t sub_file;
+
+        if (fileinfo.type == FAT_DIR) {
+            for (i = 0; i < curr_depth; i++) {
+                printf("-");
+            }
+            printf("%s\n", fileinfo.file_name);
+
+            err = xfile_open_sub(file, fileinfo.file_name, &sub_file);
+            if (err < 0) {
+                return err;
+            }
+
+            err = list_sub_files(&sub_file, curr_depth + 1);
+            if (err < 0) {
+                return err;
+            }
+        } else {
+            for (i = 0; i < curr_depth; i++) {
+                printf("-");
+            }
+            printf("%s\n", fileinfo.file_name);
+        }
+
+    } while ((err = xdir_next_file(file, &fileinfo)) == 0);
+
+    return err;
+}
+
 int dir_trans_test(void) {
     xfile_t top_dir;
     xfileinfo_t fileinfo;
@@ -290,6 +328,14 @@ int dir_trans_test(void) {
     }
     if (err < 0) {
         printf("get file info failed!\n");
+        return -1;
+    }
+
+    printf("\ntry to list all sub files!\n");
+
+    err = list_sub_files(&top_dir, 0);
+    if (err < 0) {
+        printf("list file failed!\n");
         return -1;
     }
 

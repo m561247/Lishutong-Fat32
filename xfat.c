@@ -561,6 +561,25 @@ xfat_err_t xfile_open(xfat_t * xfat, xfile_t * file, const char * path) {
 }
 
 /**
+ * 在打开的目录下，打开相应的子文件或目录
+ * @param dir  已经打开的目录
+ * @param sub_file 打开的子文件或目录
+ * @param sub_path 以已打开的目录为起点，子文件或目录的完整路径
+ * @return
+ */
+xfat_err_t xfile_open_sub(xfile_t* dir, const char* sub_path, xfile_t* sub_file) {
+    if (dir->type != FAT_DIR) {
+        return FS_ERR_PARAM;
+    }
+
+    if (memcmp(sub_path, ".", 1) == 0) {
+        return FS_ERR_PARAM;
+    }
+
+    return open_sub_file(dir->xfat, dir->start_cluster, sub_file, sub_path);
+}
+
+/**
  * 返回指定目录下的第一个文件信息
  * @param file 已经打开的文件
  * @param info 第一个文件的文件信息
