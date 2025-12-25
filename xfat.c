@@ -17,6 +17,7 @@ extern u8_t temp_buffer[512];      // todo: 缓存优化
 #define DOT_DOT_FILE            "..         "
 
 #define is_path_sep(ch)         (((ch) == '\\') || ((ch == '/')))       // 判断是否是文件名分隔符
+#define file_get_disk(file)     ((file)->xfat->disk_part->disk)         // 获取disk结构
 #define xfat_get_disk(xfat)     ((xfat)->disk_part->disk)               // 获取disk结构
 #define to_sector(disk, offset)     ((offset) / (disk)->sector_size)    // 将依稀转换为扇区号
 #define to_sector_offset(disk, offset)   ((offset) % (disk)->sector_size)   // 获取扇区中的相对偏移
@@ -676,6 +677,117 @@ xfat_err_t xfile_error(xfile_t * file) {
  */
 void xfile_clear_err(xfile_t * file) {
     file->err = FS_ERR_OK;
+}
+
+/**
+ * 从指定的文件中读取相应个数的元素数据
+ * @param buffer 数据存储的缓冲区
+ * @param elem_size 每次读取的元素字节大小
+ * @param count 读取多少个elem_size
+ * @param file 要读取的文件
+ * @return
+ */
+xfile_size_t xfile_read(void * buffer, xfile_size_t elem_size, xfile_size_t count, xfile_t * file) {
+    u32_t cluster_sector,  sector_offset;
+    xdisk_t * disk = file_get_disk(file);
+    xfile_size_t r_count_readed = 0;
+    xfile_size_t bytes_to_read = count * elem_size;
+    u8_t * read_buffer = (u8_t *)buffer;
+
+    // 只允许直接读普通文件
+    if (file->type != FAT_FILE) {
+        file->err = FS_ERR_FSTYPE;
+        return 0;
+    }
+
+    // 已经到达文件尾末，不读
+    if (file->pos >= file->size) {
+        file->err = FS_ERR_EOF;
+        return 0;
+    }
+
+    // 调整读取量，不要超过文件总量
+    if (file->pos + bytes_to_read > file->size) {
+        bytes_to_read = file->size - file->pos;
+    }
+
+    cluster_sector = to_sector(disk, to_cluster_offset(file->xfat, file->pos));  // 簇中的扇区号
+    sector_offset = to_sector_offset(disk, file->pos);  // 扇区偏移位置
+
+    while ((bytes_to_read > 0) && is_cluster_valid(file->curr_cluster)) {
+        xfat_err_t err;
+        xfile_size_t curr_read_bytes = 0;
+        u32_t sector_count = 0;
+        u32_t start_sector = cluster_fist_sector(file->xfat, file->curr_cluster) + cluster_sector;
+
+        // 起始非扇区边界对齐, 只读取当前扇区
+        // 或者起始为0，但读取量不超过当前扇区，也只读取当前扇区
+        // 无论哪种情况，都需要暂存到缓冲区中，然后拷贝到用户缓冲区
+        if ((sector_offset != 0) || (!sector_offset && (bytes_to_read < disk->sector_size))) {
+            sector_count = 1;
+            curr_read_bytes = bytes_to_read;
+
+            // 起始偏移非0，如果跨扇区，只读取当前扇区
+            if (sector_offset != 0) {
+                if (sector_offset + bytes_to_read > disk->sector_size) {
+                    curr_read_bytes = disk->sector_size - sector_offset;
+                }
+            }
+
+            // 读取整扇区，然后从中间拷贝部分数据到应用缓冲区中
+            // todo: 连续多次小批量读时，可能会重新加载同一扇区
+            err = xdisk_read_sector(disk, temp_buffer, start_sector, 1);
+            if (err < 0) {
+                file->err = err;
+                return 0;
+            }
+
+            memcpy(read_buffer, temp_buffer + sector_offset, curr_read_bytes);
+            read_buffer += curr_read_bytes;
+            bytes_to_read -= curr_read_bytes;
+        } else {
+            // 起始为0，且读取量超过1个扇区，连续读取多扇区
+            sector_count = (u32_t)to_sector(disk, bytes_to_read);
+
+            // 如果超过一簇，则只读取当前簇
+            // todo: 这里可以再优化一下，如果簇连续的话，实际是可以连读多簇的
+            if ((cluster_sector + sector_count) > file->xfat->sec_per_cluster) {
+                sector_count = file->xfat->sec_per_cluster - cluster_sector;
+            }
+
+            err = xdisk_read_sector(disk, read_buffer, start_sector, sector_count);
+            if (err != FS_ERR_OK) {
+                file->err = err;
+                return 0;
+            }
+
+            curr_read_bytes = sector_count * disk->sector_size;
+            read_buffer += curr_read_bytes;
+            bytes_to_read -= curr_read_bytes;
+        }
+        r_count_readed += curr_read_bytes;
+
+        // 校正下次读取位置
+        sector_offset += (u32_t)curr_read_bytes;
+        if (sector_offset >= disk->sector_size) {
+            sector_offset = 0;
+
+            cluster_sector += sector_count;
+            if (cluster_sector >= file->xfat->sec_per_cluster) {
+                cluster_sector = 0;
+
+                err = get_next_cluster(file->xfat, file->curr_cluster, &file->curr_cluster);
+                if (err != FS_ERR_OK) {
+                    file->err = err;
+                    return 0;
+                }
+            }
+        }
+        file->pos += (u32_t)curr_read_bytes;
+    }
+
+    file->err = is_cluster_valid(file->curr_cluster) ? FS_ERR_OK : FS_ERR_EOF;
+    return r_count_readed / elem_size;
 }
 
 /**

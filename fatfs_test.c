@@ -349,6 +349,97 @@ int dir_trans_test(void) {
     return 0;
 }
 
+int file_read_and_check(const char * path, xfile_size_t elem_size,  xfile_size_t e_count) {
+    xfile_t file;
+    xfile_size_t readed_count;
+    xfile_size_t curr_offset = 0;
+
+    xfat_err_t err = xfile_open(&xfat, &file, path);
+    if (err != FS_ERR_OK) {
+        printf("open file failed! %s\n", path);
+        return -1;
+    }
+
+    if ((readed_count = xfile_read(read_buffer, elem_size, e_count, &file)) > 0) {
+        u32_t i = 0;
+        u32_t num_start = (u32_t)curr_offset / 4;       // 起始数值
+        xfile_size_t bytes_count = readed_count * elem_size;    // 总的字节数
+        for (i = 0; i < bytes_count; i += 4) {
+            if (read_buffer[i / 4] != num_start++) {
+                printf("read file failed!\n");
+                return -1;
+            }
+        }
+    }
+
+    if (xfile_error(&file) < 0) {
+        printf("read failed!\n");
+        return -1;
+    }
+
+    xfile_close(&file);
+
+    return FS_ERR_OK;
+}
+
+int fs_read_test (void) {
+    const char * file_0b_path = "/read/0b.bin";
+    const char * file_1MB_path = "/read/1MB.bin";   // 从0x00000000~0x0003FFFF的二进制文件
+    xfat_err_t err;
+
+    printf("\nfile read test!\n");
+
+    memset(read_buffer, 0, sizeof(read_buffer));
+    err = file_read_and_check(file_0b_path, 32, 1);
+    if (err < 0) {
+        printf("read failed!");
+        return -1;
+    }
+
+    // 不超过一个扇区的读取
+    memset(read_buffer, 0, sizeof(read_buffer));
+    err = file_read_and_check(file_1MB_path, disk.sector_size - 32, 1);
+    if (err < 0) {
+        printf("read failed!");
+        return -1;
+    }
+
+    // 刚好一个扇区的读取
+    memset(read_buffer, 0, sizeof(read_buffer));
+    err = file_read_and_check(file_1MB_path, disk.sector_size, 1);
+    if (err < 0) {
+        printf("read failed!");
+        return -1;
+    }
+
+    // 跨扇区的读取
+    memset(read_buffer, 0, sizeof(read_buffer));
+    err = file_read_and_check(file_1MB_path, disk.sector_size + 14, 1);
+    if (err < 0) {
+        printf("read failed!");
+        return -1;
+    }
+
+    // 刚好超过一个簇的读取
+    memset(read_buffer, 0, sizeof(read_buffer));
+    err = file_read_and_check(file_1MB_path, xfat.cluster_byte_size + 32, 1);
+    if (err < 0) {
+        printf("read failed!");
+        return -1;
+    }
+    
+    // 跨多个簇的读取
+    memset(read_buffer, 0, sizeof(read_buffer));
+    err = file_read_and_check(file_1MB_path, 2 * xfat.cluster_byte_size + 32, 1);
+    if (err < 0) {
+        printf("read failed!");
+        return -1;
+    }
+
+    printf("\nfile read test ok\n");
+    return FS_ERR_OK;
+}
+
 int fs_open_test (void) {
     const char * not_exist_path = "/file_not_exist.txt";
     const char * exist_path = "/12345678ABC";    // 注意：文件名要大写
@@ -437,8 +528,14 @@ int main (void) {
 //    err = fs_open_test();
 //    if (err) return err;
 
-    err = dir_trans_test();
-    if (err) return err;
+//    err = dir_trans_test();
+//    if (err) return err;
+
+    err = fs_read_test();
+    if (err < 0) {
+        printf("read tesst failed");
+        return -1;
+    }
 
     err = xdisk_close(&disk);
     if (err) {
