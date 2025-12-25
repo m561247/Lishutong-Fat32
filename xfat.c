@@ -320,7 +320,7 @@ static void sfn_to_myname(char *dest_name, const diritem_t * diritem) {
     u8_t ext_exist = raw_name[8] != 0x20;
     u8_t scan_len = ext_exist ? SFN_LEN + 1 : SFN_LEN;
 
-    memset(dest_name, 0, X_FILEINFO_NAME_SIZE);   
+    memset(dest_name, 0, X_FILEINFO_NAME_SIZE);
 
     // 要考虑大小写问题，根据NTRes配置转换成相应的大小写
     for (i = 0; i < scan_len; i++) {
@@ -659,6 +659,23 @@ xfat_err_t xdir_next_file (xfile_t * file, xfileinfo_t * info) {
 
     copy_file_info(info, dir_item);
     return err;
+}
+
+/**
+ * 获取文件读写的错误码
+ * @param file
+ * @return
+ */
+xfat_err_t xfile_error(xfile_t * file) {
+    return file->err;
+}
+
+/**
+ * 清除文件读写错误状态码
+ * @param file
+ */
+void xfile_clear_err(xfile_t * file) {
+    file->err = FS_ERR_OK;
 }
 
 /**
