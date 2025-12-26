@@ -218,6 +218,15 @@ typedef enum _xfile_orgin_t {
     XFAT_SEEK_END,                    // 文件结尾
 }xfile_orgin_t;
 
+/**
+ * 文件修改的时间类型
+ */
+typedef enum _stime_type_t {
+    XFAT_TIME_ATIME,                  // 修改访问时间
+    XFAT_TIME_CTIME,                  // 修改创建时间
+    XFAT_TIME_MTIME,                  // 修改修改时间
+}stime_type_t;
+
 u32_t cluster_fist_sector(xfat_t *xfat, u32_t cluster_no);
 xfat_err_t is_cluster_valid(u32_t cluster);
 xfat_err_t get_next_cluster(xfat_t *xfat, u32_t curr_cluster_no, u32_t *next_cluster);
@@ -240,5 +249,8 @@ xfile_size_t xfile_tell(xfile_t * file);
 xfat_err_t xfile_seek(xfile_t * file, xfile_ssize_t offset, xfile_orgin_t origin);
 
 xfat_err_t xfile_rename(xfat_t * xfat, const char * path, const char * new_name);
+xfat_err_t xfile_set_atime (xfat_t * xfat, const char * path, xfile_time_t * time);
+xfat_err_t xfile_set_mtime (xfat_t * xfat, const char * path, xfile_time_t * time);
+xfat_err_t xfile_set_ctime (xfat_t * xfat, const char * path, xfile_time_t * time);
 
 #endif /* XFAT_H */

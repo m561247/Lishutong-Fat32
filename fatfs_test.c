@@ -590,6 +590,7 @@ xfat_err_t fs_modify_file_test(void) {
     const char file_name2[] = "efg.ABC";
     const char * new_name;
     char curr_path[64];
+    xfile_time_t timeinfo;
 
     printf("modify file attr test...\n");
 
@@ -629,6 +630,45 @@ xfat_err_t fs_modify_file_test(void) {
     xfile_close(&file);
 
     printf("\n After rename:\n");
+
+    sprintf(curr_path, "%s%s", dir_path, new_name);
+
+    // 修改文件时间
+    timeinfo.year = 2030;
+    timeinfo.month = 10;
+    timeinfo.day = 12;
+    timeinfo.hour = 13;
+    timeinfo.minute = 32;
+    timeinfo.second = 12;
+    err = xfile_set_atime(&xfat, curr_path, &timeinfo);
+    if (err < 0) {
+        printf("set acc time failed!\n");
+        return err;
+    }
+
+    timeinfo.year = 2031;
+    timeinfo.month = 11;
+    timeinfo.day = 13;
+    timeinfo.hour = 14;
+    timeinfo.minute = 33;
+    timeinfo.second = 13;
+    err = xfile_set_mtime(&xfat, curr_path, &timeinfo);
+    if (err < 0) {
+        printf("set modify time failed!\n");
+        return err;
+    }
+
+    timeinfo.year = 2032;
+    timeinfo.month = 12;
+    timeinfo.day = 14;
+    timeinfo.hour = 15;
+    timeinfo.minute = 35;
+    timeinfo.second = 14;
+    err = xfile_set_ctime(&xfat, curr_path, &timeinfo);
+    if (err < 0) {
+        printf("set create time failed!\n");
+        return err;
+    }
 
     // 重命名后，列表显示所有文件，显示命名状态
     err = xfile_open(&xfat, &file, dir_path);
