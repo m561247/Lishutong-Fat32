@@ -202,6 +202,16 @@ typedef struct _xfile_t {
     u32_t curr_cluster;             // 当前簇号
 } xfile_t;
 
+/**
+ * 文件seek的定位类型
+ */
+typedef enum _xfile_orgin_t {
+    XFAT_SEEK_SET,                    // 文件开头
+    XFAT_SEEK_CUR,                    // 当前位置
+    XFAT_SEEK_END,                    // 文件结尾
+}xfile_orgin_t;
+
+u32_t cluster_fist_sector(xfat_t *xfat, u32_t cluster_no);
 xfat_err_t is_cluster_valid(u32_t cluster);
 xfat_err_t get_next_cluster(xfat_t *xfat, u32_t curr_cluster_no, u32_t *next_cluster);
 xfat_err_t read_cluster(xfat_t *xfat, u8_t *buffer, u32_t cluster, u32_t count);
@@ -217,5 +227,9 @@ xfat_err_t xfile_error(xfile_t * file);
 void xfile_clear_err(xfile_t * file);
 
 xfile_size_t xfile_read(void * buffer, xfile_size_t elem_size, xfile_size_t count, xfile_t * file);
+
+xfat_err_t xfile_eof(xfile_t * file);
+xfile_size_t xfile_tell(xfile_t * file);
+xfat_err_t xfile_seek(xfile_t * file, xfile_ssize_t offset, xfile_orgin_t origin);
 
 #endif /* XFAT_H */

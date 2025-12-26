@@ -791,6 +791,98 @@ xfile_size_t xfile_read(void * buffer, xfile_size_t elem_size, xfile_size_t coun
 }
 
 /**
+ * 文件是否已经读写到末尾
+ * @param file 查询的文件
+ * @return
+ */
+xfat_err_t xfile_eof(xfile_t * file) {
+    return (file->pos >= file->size) ? FS_ERR_EOF : FS_ERR_OK;
+}
+
+/**
+ * 返回当前文件的位置
+ * @param file 已经打开的文件
+ * @return
+ */
+xfile_size_t xfile_tell(xfile_t * file) {
+    return file->pos;
+}
+
+/**
+ * 调整文件当前的读写位置
+ * @param file 已经打开的文件
+ * @param offset 相对于origin指定位置的偏移量
+ * @param origin 相对于哪个位置计算偏移量
+ * @return
+ */
+xfat_err_t xfile_seek(xfile_t * file, xfile_ssize_t offset, xfile_orgin_t origin) {
+    xfat_err_t err = FS_ERR_OK;
+    xfile_ssize_t final_pos;
+    xfile_size_t offset_to_move;
+    u32_t curr_cluster, curr_pos;
+
+    // 获取最终的定位位置
+    switch (origin) {
+    case XFAT_SEEK_SET:
+        final_pos = offset;
+        break;
+    case XFAT_SEEK_CUR:
+        final_pos = file->pos + offset;
+        break;
+    case XFAT_SEEK_END:
+        final_pos = file->size + offset;
+        break;
+    default:
+        final_pos = -1;
+        break;            
+    }
+
+    // 超出文件范围
+    if ((final_pos < 0) || (final_pos >= file->size)) {
+        return FS_ERR_PARAM;
+    }
+
+    // 相对于当前要调整的偏移量
+    offset = final_pos - file->pos;
+    if (offset > 0) {
+        curr_cluster = file->curr_cluster;
+        curr_pos = file->pos;
+        offset_to_move = (xfile_size_t)offset;
+    } else {
+        curr_cluster = file->start_cluster;
+        curr_pos = 0;
+        offset_to_move = (xfile_size_t)final_pos;
+    }
+
+    while (offset_to_move > 0) {
+        u32_t cluster_offset = to_cluster_offset(file->xfat, curr_pos);
+        xfile_size_t curr_move = offset_to_move;
+
+        // 不超过当前簇
+        if (cluster_offset + curr_move < file->xfat->cluster_byte_size) {
+            curr_pos += curr_move;
+            break;
+        }
+
+        // 超过当前簇，只在当前簇内移动
+        curr_move = file->xfat->cluster_byte_size - cluster_offset;
+        curr_pos += curr_move;
+        offset_to_move -= curr_move;
+
+        // 进入下一簇: 是否要判断后续簇是否正确？
+        err = get_next_cluster(file->xfat, curr_cluster, &curr_cluster);
+        if (err < 0) {
+            file->err = err;
+            return err;
+        }
+    } 
+
+    file->pos = curr_pos;
+    file->curr_cluster = curr_cluster;
+    return FS_ERR_OK;
+}
+
+/**
  * 关闭已经打开的文件
  * @param file 待关闭的文件
  * @return

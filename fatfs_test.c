@@ -440,6 +440,100 @@ int fs_read_test (void) {
     return FS_ERR_OK;
 }
 
+int _fs_seek_test(xfile_t * file, xfile_orgin_t orgin, xfile_ssize_t offset) {
+    int err = 0;
+    xfile_ssize_t target_pos;
+    u32_t count;
+
+    switch (orgin) {
+        case XFAT_SEEK_SET:
+            target_pos = offset;
+            break;
+        case XFAT_SEEK_END:
+            target_pos = file->size + offset;
+            break;
+        case XFAT_SEEK_CUR:
+            target_pos = file->pos + offset;
+            break;
+        default:
+            target_pos = 0;
+            break;
+    }
+
+    err = xfile_seek(file, offset, orgin);
+    if (err) {
+        printf("seek error\n");
+        return -1;
+    }
+
+    if (xfile_tell(file) != target_pos) {
+        printf("seek error\n");
+        return -1;
+    }
+
+    count = xfile_read(read_buffer, 1, 1, file);
+    if (count < 1) {
+        printf("seek error\n");
+        return -1;
+    }
+
+    if (*(u8_t *)read_buffer != (target_pos % 256)){
+        printf("seek error\n");
+        return -1;
+    }
+    return 0;
+}
+
+int fs_seek_test(void) {
+    xfat_err_t err;
+    xfile_t file;
+
+    printf("\nfile seek test!\n");
+
+    err = xfile_open(&xfat, &file, "/seek/1MB.bin");
+    if (err != FS_ERR_OK) {
+        printf("open file failed!\n");
+        return -1;
+    }
+
+    err = _fs_seek_test(&file, XFAT_SEEK_SET, 32);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_SET, 576);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_SET, 4193);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_SET, -1);
+    if (err == FS_ERR_OK) return -1;
+
+    err = _fs_seek_test(&file, XFAT_SEEK_CUR, 32);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_CUR, 576);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_CUR, 4193);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_CUR, -32);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_CUR, -512);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_CUR, -1024);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_CUR, -0xFFFFFFF);
+    if (err == FS_ERR_OK) return -1;
+
+    err = _fs_seek_test(&file, XFAT_SEEK_END, -32);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_END, -576);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_END, -4193);
+    if (err) return err;
+    err = _fs_seek_test(&file, XFAT_SEEK_END, 32);
+    if (err == FS_ERR_OK) return -1;
+
+    xfile_close(&file);
+    printf("all seek test ok!\n");
+    return 0;
+}
+
 int fs_open_test (void) {
     const char * not_exist_path = "/file_not_exist.txt";
     const char * exist_path = "/12345678ABC";    // 注意：文件名要大写
@@ -531,11 +625,14 @@ int main (void) {
 //    err = dir_trans_test();
 //    if (err) return err;
 
-    err = fs_read_test();
-    if (err < 0) {
-        printf("read tesst failed");
-        return -1;
-    }
+//    err = fs_read_test();
+//    if (err < 0) {
+//        printf("read tesst failed");
+//        return -1;
+//    }
+
+    err = fs_seek_test();
+    if (err) return err;
 
     err = xdisk_close(&disk);
     if (err) {
