@@ -582,6 +582,70 @@ int fs_open_test (void) {
     return 0;
 }
 
+xfat_err_t fs_modify_file_test(void) {
+    xfat_err_t err;
+    xfile_t file;
+    const char * dir_path = "/modify/a0/a1/a2/";
+    const char file_name1[] = "ABC.efg";
+    const char file_name2[] = "efg.ABC";
+    const char * new_name;
+    char curr_path[64];
+
+    printf("modify file attr test...\n");
+
+    printf("\n Before rename:\n");
+
+    // 显示原目录下的文件
+    err = xfile_open(&xfat, &file, dir_path);
+    if (err < 0) {
+        printf("Open dir failed!\n");
+        return err;
+    }
+
+    err = list_sub_files(&file, 0);
+    if (err < 0) {
+        return err;
+    }
+    xfile_close(&file);
+
+    // 尝试打开其中一个路径，判断如何命名
+    sprintf(curr_path, "%s%s", dir_path, file_name1);
+    err = xfile_open(&xfat, &file, curr_path);
+    if (err < 0) {
+        // 打开文件1失败，则当前文件2存在，新名称为文件1名称
+        sprintf(curr_path, "%s%s", dir_path, file_name2);
+        new_name = file_name1;
+    } else {
+        sprintf(curr_path, "%s%s", dir_path, file_name1);
+        new_name = file_name2;
+    }
+
+    // 文件重命名
+    err = xfile_rename(&xfat, curr_path, new_name);
+    if (err < 0) {
+        printf("rename failed: %s -- to -- %s\n", curr_path, new_name);
+        return err;
+    }
+    xfile_close(&file);
+
+    printf("\n After rename:\n");
+
+    // 重命名后，列表显示所有文件，显示命名状态
+    err = xfile_open(&xfat, &file, dir_path);
+    if (err < 0) {
+        printf("Open dir failed!\n");
+        return err;
+    }
+
+    err = list_sub_files(&file, 0);
+    if (err < 0) {
+        return err;
+    }
+    xfile_close(&file);
+
+    return FS_ERR_OK;
+}
+
 int main (void) {
     xfat_err_t err;
     int i;
@@ -631,7 +695,10 @@ int main (void) {
 //        return -1;
 //    }
 
-    err = fs_seek_test();
+//    err = fs_seek_test();
+//    if (err) return err;
+
+    err = fs_modify_file_test();
     if (err) return err;
 
     err = xdisk_close(&disk);

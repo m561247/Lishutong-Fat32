@@ -21,7 +21,20 @@ extern u8_t temp_buffer[512];      // todo: 缓存优化
 #define xfat_get_disk(xfat)     ((xfat)->disk_part->disk)               // 获取disk结构
 #define to_sector(disk, offset)     ((offset) / (disk)->sector_size)    // 将依稀转换为扇区号
 #define to_sector_offset(disk, offset)   ((offset) % (disk)->sector_size)   // 获取扇区中的相对偏移
+#define to_sector_addr(disk, offset)    ((offset) / (disk)->sector_size * (disk)->sector_size)  // 取Offset所在扇区起始地址
 #define to_cluster_offset(xfat, pos)      ((pos) % ((xfat)->cluster_byte_size)) // 获取簇中的相对偏移
+
+/**
+ * 将簇号和簇偏移转换为扇区号
+ * @param xfat
+ * @param cluster
+ * @param cluster_offset
+ * @return
+ */
+u32_t to_phy_sector(xfat_t* xfat, u32_t cluster, u32_t cluster_offset) {
+    xdisk_t* disk = xfat_get_disk(xfat);
+    return cluster_fist_sector((xfat), (cluster)) + to_sector((disk), (cluster_offset));
+}
 
 /**
  * 从dbr中解析出fat相关配置参数
@@ -214,6 +227,56 @@ static xfat_err_t to_sfn(char* dest_name, const char* my_name) {
     return FS_ERR_OK;
 }
 
+
+/**
+ * 检查sfn字符串中是否是大写。如果中间有任意小写，都认为是小写
+ * @param name
+ * @return
+ */
+static u8_t get_sfn_case_cfg(const char * sfn_name) {
+    u8_t case_cfg = 0;
+
+    int name_len;
+    const char * src_name = sfn_name;
+    const char * ext_dot;
+    const char * p;
+    int ext_existed;
+
+    // 跳过开头的分隔符
+    while (is_path_sep(*src_name)) {
+        src_name++;
+    }
+
+    // 找到第一个斜杠之前的字符串，将ext_dot定位到那里，且记录有效长度
+    ext_dot = src_name;
+    p = src_name;
+    name_len = 0;
+    while ((*p != '\0') && !is_path_sep(*p)) {
+        if (*p == '.') {
+            ext_dot = p;
+        }
+        p++;
+        name_len++;
+    }
+
+    // 如果文件名以.结尾，意思就是没有扩展名？
+    // todo: 长文件名处理?
+    ext_existed = (ext_dot > src_name) && (ext_dot < (src_name + name_len - 1));
+    for (p = src_name; p < src_name + name_len; p++) {
+        if (ext_existed) {
+            if (p < ext_dot) { // 文件名主体部分大小写判断
+                case_cfg |= islower(*p) ? DIRITEM_NTRES_BODY_LOWER : 0;
+            } else if (p > ext_dot) {
+                case_cfg |= islower(*p) ? DIRITEM_NTRES_EXT_LOWER : 0;
+            }
+        } else {
+            case_cfg |= islower(*p) ? DIRITEM_NTRES_BODY_LOWER : 0;
+        }
+    }
+
+    return case_cfg;
+}
+
 /**
  * 判断两个文件名是否匹配
  * @param name_in_item fatdir中的文件名格式
@@ -350,6 +413,103 @@ static void sfn_to_myname(char *dest_name, const diritem_t * diritem) {
  */
 static u32_t get_diritem_cluster (diritem_t * item) {
     return (item->DIR_FstClusHI << 16) | item->DIR_FstClusL0;
+}
+
+/**
+ * 移动簇的位置
+ * @param xfat
+ * @param curr_cluster 当前簇号
+ * @param curr_offset 当前簇偏移
+ * @param move_bytes 移动的字节量（当前只支持本簇及相邻簇内的移动)
+ * @param next_cluster 移动后的簇号
+ * @param next_offset 移动后的簇偏移
+ * @return
+ */
+xfat_err_t move_cluster_pos(xfat_t* xfat, u32_t curr_cluster, u32_t curr_offset, u32_t move_bytes,
+    u32_t* next_cluster, u32_t* next_offset) {
+    if ((curr_offset + move_bytes) >= xfat->cluster_byte_size) {
+        xfat_err_t err = get_next_cluster(xfat, curr_cluster, next_cluster);
+        if (err < 0) {
+            return err;
+        }
+
+        *next_offset = 0;
+    }
+    else {
+        *next_cluster = curr_cluster;
+        *next_offset = curr_offset + move_bytes;
+    }
+
+    return FS_ERR_OK;
+}
+
+/**
+ * 获取下一个有效的目录项
+ * @param xfat
+ * @param curr_cluster 当前目录项对应的簇号
+ * @param curr_offset  当前目录项对应的偏移
+ * @param next_cluster 下一目录项对应的簇号
+ * @param next_offset  当前目录项对应的簇偏移
+ * @param temp_buffer 簇存储的缓冲区
+ * @param diritem 下一个有效的目录项
+ * @return
+ */
+xfat_err_t get_next_diritem(xfat_t* xfat, u8_t type, u32_t start_cluster, u32_t start_offset,
+    u32_t* found_cluster, u32_t* found_offset, u32_t* next_cluster, u32_t* next_offset,
+    u8_t* temp_buffer, diritem_t** diritem) {
+    xfat_err_t err;
+    diritem_t* r_diritem;
+
+    while (is_cluster_valid(start_cluster)) {
+        u32_t sector_offset;
+
+        // 预先取下一位置，方便后续处理
+        err = move_cluster_pos(xfat, start_cluster, start_offset, sizeof(diritem_t), next_cluster, next_offset);
+        if (err < 0) {
+            return err;
+        }
+
+        sector_offset = to_sector_offset(xfat_get_disk(xfat), start_offset);
+        if (sector_offset == 0) {
+            u32_t curr_sector = to_phy_sector(xfat, start_cluster, start_offset);
+            err = xdisk_read_sector(xfat_get_disk(xfat), temp_buffer, curr_sector, 1);
+            if (err < 0) return err;
+        }
+
+        r_diritem = (diritem_t*)(temp_buffer + sector_offset);
+        switch (r_diritem->DIR_Name[0]) {
+        case DIRITEM_NAME_END:
+            if (type & DIRITEM_GET_END) {
+                *diritem = r_diritem;
+                *found_cluster = start_cluster;
+                *found_offset = start_offset;
+                return FS_ERR_OK;
+            }
+            break;
+        case DIRITEM_NAME_FREE:
+            if (type & DIRITEM_GET_FREE) {
+                *diritem = r_diritem;
+                *found_cluster = start_cluster;
+                *found_offset = start_offset;
+                return FS_ERR_OK;
+            }
+            break;
+        default:
+            if (type & DIRITEM_GET_USED) {
+                *diritem = r_diritem;
+                *found_cluster = start_cluster;
+                *found_offset = start_offset;
+                return FS_ERR_OK;
+            }
+            break;
+        }
+
+        start_cluster = *next_cluster;
+        start_offset = *next_offset;
+    }
+
+    *diritem = (diritem_t*)0;
+    return FS_ERR_EOF;
 }
 
 /**
@@ -834,7 +994,7 @@ xfat_err_t xfile_seek(xfile_t * file, xfile_ssize_t offset, xfile_orgin_t origin
         break;
     default:
         final_pos = -1;
-        break;            
+        break;
     }
 
     // 超出文件范围
@@ -875,10 +1035,67 @@ xfat_err_t xfile_seek(xfile_t * file, xfile_ssize_t offset, xfile_orgin_t origin
             file->err = err;
             return err;
         }
-    } 
+    }
 
     file->pos = curr_pos;
     file->curr_cluster = curr_cluster;
+    return FS_ERR_OK;
+}
+
+/**
+ * 文件重命名
+ * @param xfat
+ * @param path 需要命名的文件完整路径
+ * @param new_name 文件新的名称
+ * @return
+ */
+xfat_err_t xfile_rename(xfat_t* xfat, const char* path, const char* new_name) {
+    diritem_t* diritem = (diritem_t*)0;
+    u32_t curr_cluster, curr_offset;
+    u32_t next_cluster, next_offset;
+    u32_t found_cluster, found_offset;
+    const char * curr_path;
+
+    curr_cluster = xfat->root_cluster;
+    curr_offset = 0;
+    for (curr_path = path; curr_path != '\0'; curr_path = get_child_path(curr_path)) {
+        do {
+            xfat_err_t err = get_next_diritem(xfat, DIRITEM_GET_USED, curr_cluster, curr_offset,
+                    &found_cluster, &found_offset , &next_cluster, &next_offset, temp_buffer, &diritem);
+            if (err < 0) {
+                return err;
+            }
+
+            if (diritem == (diritem_t*)0) {    // 已经搜索到目录结束
+                return FS_ERR_NONE;
+            }
+
+            if (is_filename_match((const char*)diritem->DIR_Name, curr_path)) {
+                // 找到，比较下一级子目录
+                if (get_file_type(diritem) == FAT_DIR) {
+                    curr_cluster = get_diritem_cluster(diritem);
+                    curr_offset = 0;
+                }
+                break;
+            }
+
+            curr_cluster = next_cluster;
+            curr_offset = next_offset;
+        } while (1);
+    }
+
+    if (diritem && !curr_path) {
+        // 这种方式只能用于SFN文件项重命名
+        u32_t dir_sector = to_phy_sector(xfat, found_cluster, found_offset);
+        to_sfn((char *)diritem->DIR_Name, new_name);
+
+        // 根据文件名的实际情况，重新配置大小写
+        diritem->DIR_NTRes &= ~DIRITEM_NTRES_CASE_MASK;
+        diritem->DIR_NTRes |= get_sfn_case_cfg(new_name);
+
+        return xdisk_write_sector(xfat_get_disk(xfat), temp_buffer, dir_sector, 1);
+    }
+
     return FS_ERR_OK;
 }
 
