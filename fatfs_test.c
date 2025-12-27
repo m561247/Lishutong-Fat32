@@ -427,7 +427,7 @@ int fs_read_test (void) {
         printf("read failed!");
         return -1;
     }
-    
+
     // 跨多个簇的读取
     memset(read_buffer, 0, sizeof(read_buffer));
     err = file_read_and_check(file_1MB_path, 2 * xfat.cluster_byte_size + 32, 1);
@@ -686,6 +686,104 @@ xfat_err_t fs_modify_file_test(void) {
     return FS_ERR_OK;
 }
 
+int file_write_test(const char * path, u32_t elem_size, u32_t elem_count, u32_t write_count) {
+    u32_t i, j;
+    xfat_err_t err;
+    xfile_t file;
+
+    err = xfile_open(&xfat, &file, path);
+    if (err < 0) {
+        printf("Open failed:%s\n", path);
+        return err;
+    }
+
+    // 连续多次测试写入
+    for (i = 0; i < write_count; i++) {
+        u32_t end;
+
+        // 从预先指定的write_buffer中取出数据写入文件
+        err = xfile_write(write_buffer, elem_size, elem_count, &file);
+        if (err < 0) {
+            printf("Write failed\n");
+            return err;
+        }
+
+        // 再定位到文件开始处
+        err = xfile_seek(&file, -(xfile_ssize_t)(elem_size * elem_count), XFAT_SEEK_CUR);
+        if (err < 0) {
+            printf("seek failed\n");
+            return err;
+        }
+
+        // 读取比较，检查是否完全写入
+        memset(read_buffer, 0, sizeof(read_buffer));
+        err = xfile_read(read_buffer, elem_size, elem_count, &file);
+        if (err < 0) {
+            printf("read failed\n");
+            return err;
+        }
+
+        end = (u32_t)elem_size * elem_count / sizeof(u32_t);
+        for (j = 0; j < end; j++) {
+            if (read_buffer[j] != j) {
+                printf("content different!\n");
+                return -1;
+            }
+        }
+    }
+
+    xfile_close(&file);
+    return 0;
+}
+
+int fs_write_test (void) {
+    const char * dir_path = "/write/";
+    char file_path[64];
+    xfat_err_t err;
+
+    printf("Write file test!\n");
+
+    sprintf(file_path, "%s%s", dir_path, "1MB.bin");
+    err = file_write_test(file_path, 32, 64, 5);     // 不到一个扇区，且非扇区边界对齐的写
+    if (err < 0) {
+        printf("write file failed!\n");
+        return err;
+    }
+
+    err = file_write_test(file_path, disk.sector_size, 12, 5);     // 扇区边界写，且非扇区边界对齐的写
+    if (err < 0) {
+        printf("write file failed!\n");
+        return err;
+    }
+
+    err = file_write_test(file_path, disk.sector_size + 32, 12, 5);     // 超过1个扇区，且非扇区边界对齐的写
+    if (err < 0) {
+        printf("write file failed!\n");
+        return err;
+    }
+
+    err = file_write_test(file_path, xfat.cluster_byte_size, 12, 5);     // 簇边界写，且非扇区边界对齐的写
+    if (err < 0) {
+        printf("write file failed!\n");
+        return err;
+    }
+
+    err = file_write_test(file_path, xfat.cluster_byte_size + 32, 12, 5);     // 超过1个簇，且非扇区边界对齐的写
+    if (err < 0) {
+        printf("write file failed!\n");
+        return err;
+    }
+
+    err = file_write_test(file_path, 3 * xfat.cluster_byte_size + 32, 12, 5);     // 超过多个簇，且非扇区边界对齐的写
+    if (err < 0) {
+        printf("write file failed!\n");
+        return err;
+    }
+
+    printf("Write file test end!\n");
+    return 0;
+}
+
 int main (void) {
     xfat_err_t err;
     int i;
@@ -729,16 +827,19 @@ int main (void) {
 //    err = dir_trans_test();
 //    if (err) return err;
 
-//    err = fs_read_test();
-//    if (err < 0) {
-//        printf("read tesst failed");
-//        return -1;
-//    }
+    err = fs_read_test();
+    if (err < 0) {
+        printf("read tesst failed");
+        return -1;
+    }
 
 //    err = fs_seek_test();
 //    if (err) return err;
-
-    err = fs_modify_file_test();
+//
+//    err = fs_modify_file_test();
+//    if (err) return err;
+//
+    err = fs_write_test();
     if (err) return err;
 
     err = xdisk_close(&disk);

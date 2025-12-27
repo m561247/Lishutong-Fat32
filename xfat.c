@@ -685,11 +685,13 @@ static xfat_err_t open_sub_file (xfat_t * xfat, u32_t dir_cluster, xfile_t * fil
 
         file->size = dir_item->DIR_FileSize;
         file->type = get_file_type(dir_item);
+        file->attr = (dir_item->DIR_Attr & DIRITEM_ATTR_READ_ONLY) ? XFILE_ATTR_READONLY : 0;
         file->start_cluster = file_start_cluster;
         file->curr_cluster = file_start_cluster;
     } else {
         file->size = 0;
         file->type = FAT_DIR;
+        file->attr = 0;
         file->start_cluster = parent_cluster;
         file->curr_cluster = parent_cluster;
     }
@@ -839,6 +841,29 @@ void xfile_clear_err(xfile_t * file) {
     file->err = FS_ERR_OK;
 }
 
+static xfat_err_t move_file_pos(xfile_t* file, u32_t move_bytes) {
+	u32_t to_move = move_bytes;
+	u32_t cluster_offset;
+
+	// 不要超过文件的大小
+	if (file->pos + move_bytes >= file->size) {
+		to_move = file->size - file->pos;
+	}
+
+	// 簇间移动调整，需要调整簇
+	cluster_offset = to_cluster_offset(file->xfat, file->pos);
+	if (cluster_offset + to_move >= file->xfat->cluster_byte_size) {
+		xfat_err_t err = get_next_cluster(file->xfat, file->curr_cluster, &file->curr_cluster);
+		if (err != FS_ERR_OK) {
+			file->err = err;
+			return err;
+		}
+	}
+
+	file->pos += to_move;
+	return FS_ERR_OK;
+}
+
 /**
  * 从指定的文件中读取相应个数的元素数据
  * @param buffer 数据存储的缓冲区
@@ -848,7 +873,6 @@ void xfile_clear_err(xfile_t * file) {
  * @return
  */
 xfile_size_t xfile_read(void * buffer, xfile_size_t elem_size, xfile_size_t count, xfile_t * file) {
-    u32_t cluster_sector,  sector_offset;
     xdisk_t * disk = file_get_disk(file);
     xfile_size_t r_count_readed = 0;
     xfile_size_t bytes_to_read = count * elem_size;
@@ -871,14 +895,14 @@ xfile_size_t xfile_read(void * buffer, xfile_size_t elem_size, xfile_size_t coun
         bytes_to_read = file->size - file->pos;
     }
 
-    cluster_sector = to_sector(disk, to_cluster_offset(file->xfat, file->pos));  // 簇中的扇区号
-    sector_offset = to_sector_offset(disk, file->pos);  // 扇区偏移位置
 
     while ((bytes_to_read > 0) && is_cluster_valid(file->curr_cluster)) {
         xfat_err_t err;
         xfile_size_t curr_read_bytes = 0;
         u32_t sector_count = 0;
-        u32_t start_sector = cluster_fist_sector(file->xfat, file->curr_cluster) + cluster_sector;
+		u32_t cluster_sector = to_sector(disk, to_cluster_offset(file->xfat, file->pos));  // 簇中的扇区号
+		u32_t sector_offset = to_sector_offset(disk, file->pos);  // 扇区偏移位置
+		u32_t start_sector = cluster_fist_sector(file->xfat, file->curr_cluster) + cluster_sector;
 
         // 起始非扇区边界对齐, 只读取当前扇区
         // 或者起始为0，但读取量不超过当前扇区，也只读取当前扇区
@@ -925,29 +949,118 @@ xfile_size_t xfile_read(void * buffer, xfile_size_t elem_size, xfile_size_t coun
             read_buffer += curr_read_bytes;
             bytes_to_read -= curr_read_bytes;
         }
+
         r_count_readed += curr_read_bytes;
 
-        // 校正下次读取位置
-        sector_offset += (u32_t)curr_read_bytes;
-        if (sector_offset >= disk->sector_size) {
-            sector_offset = 0;
-            cluster_sector += sector_count;
+		err = move_file_pos(file, curr_read_bytes);
+		if (err) return 0;
+	}
 
-            if (cluster_sector >= file->xfat->sec_per_cluster) {
-                cluster_sector = 0;
+    file->err = file->size == file->pos;
+    return r_count_readed / elem_size;
+}
 
-                err = get_next_cluster(file->xfat, file->curr_cluster, &file->curr_cluster);
-                if (err != FS_ERR_OK) {
-                    file->err = err;
-                    return 0;
-                }
-            }
-        }
-        file->pos += (u32_t)curr_read_bytes;
+/**
+ * 往指定文件中写入数据
+ * @param buffer 数据的缓冲
+ * @param elem_size 写入的元素字节大小
+ * @param count 写入多少个elem_size
+ * @param file 待写入的文件
+ * @return
+ */
+xfile_size_t xfile_write(void * buffer, xfile_size_t elem_size, xfile_size_t count, xfile_t * file) {
+    xdisk_t * disk = file_get_disk(file);
+    u32_t r_count_write = 0;
+    xfile_size_t bytes_to_write = count * elem_size;
+    xfat_err_t err;
+    u8_t * write_buffer = (u8_t *)buffer;
+
+     // 只允许直接写普通文件
+    if (file->type != FAT_FILE) {
+        file->err = FS_ERR_FSTYPE;
+        return 0;
     }
 
-    file->err = is_cluster_valid(file->curr_cluster) ? FS_ERR_OK : FS_ERR_EOF;
-    return r_count_readed / elem_size;
+    // 只读性检查
+    if (file->attr & XFILE_ATTR_READONLY) {
+        file->err = FS_ERR_READONLY;
+        return 0;
+    }
+
+    // 字节为0，无需写，直接退出
+    if (bytes_to_write == 0) {
+        file->err = FS_ERR_OK;
+        return 0;
+    }
+
+    while (bytes_to_write > 0) {
+        u32_t curr_write_bytes = 0;
+        u32_t sector_count = 0;
+
+		u32_t cluster_sector = to_sector(disk, to_cluster_offset(file->xfat, file->pos));  // 簇中的扇区偏移
+		u32_t sector_offset = to_sector_offset(disk, file->pos);  // 扇区偏移位置
+		u32_t start_sector = cluster_fist_sector(file->xfat, file->curr_cluster) + cluster_sector;
+
+        // 起始非扇区边界对齐, 只写取当前扇区
+        // 或者起始为0，但写量不超过当前扇区，也只写当前扇区
+        // 无论哪种情况，都需要暂存到缓冲区中，然后拷贝到回写到扇区中
+        if ((sector_offset != 0) || (!sector_offset && (bytes_to_write < disk->sector_size))) {
+            sector_count = 1;
+            curr_write_bytes = bytes_to_write;
+
+            // 起始偏移非0，如果跨扇区，只写当前扇区
+            if (sector_offset != 0) {
+                if (sector_offset + bytes_to_write > disk->sector_size) {
+                    curr_write_bytes = disk->sector_size - sector_offset;
+                }
+            }
+
+            // 写整扇区，写入部分到缓冲，最后再回写
+            // todo: 连续多次小批量读时，可能会重新加载同一扇区
+            err = xdisk_read_sector(disk, temp_buffer, start_sector, 1);
+            if (err < 0) {
+                file->err = err;
+                return 0;
+            }
+
+            memcpy(temp_buffer + sector_offset, write_buffer, curr_write_bytes);
+            err = xdisk_write_sector(disk, temp_buffer, start_sector, 1);
+            if (err < 0) {
+                file->err = err;
+                return 0;
+            }
+
+            write_buffer += curr_write_bytes;
+            bytes_to_write -= curr_write_bytes;
+        } else {
+            // 起始为0，且写量超过1个扇区，连续写多扇区
+            sector_count = to_sector(disk, bytes_to_write);
+
+            // 如果超过一簇，则只写当前簇
+            // todo: 这里可以再优化一下，如果簇连写的话，实际是可以连写多簇的
+            if ((cluster_sector + sector_count) > file->xfat->sec_per_cluster) {
+                sector_count = file->xfat->sec_per_cluster - cluster_sector;
+            }
+
+            err = xdisk_write_sector(disk, write_buffer, start_sector, sector_count);
+            if (err != FS_ERR_OK) {
+                file->err = err;
+                return 0;
+            }
+
+            curr_write_bytes = sector_count * disk->sector_size;
+            write_buffer += curr_write_bytes;
+            bytes_to_write -= curr_write_bytes;
+        }
+
+        r_count_write += curr_write_bytes;
+
+		err = move_file_pos(file, curr_write_bytes);
+		if (err) return 0;
+    }
+
+    file->err = file->pos == file->size;
+    return r_count_write / elem_size;
 }
 
 /**
